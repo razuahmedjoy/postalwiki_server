@@ -1,0 +1,11 @@
+# add node_modules
+node_modules
+
+# add logs files not the folder
+*.log
+
+# add all .env files
+.env
+
+
+
