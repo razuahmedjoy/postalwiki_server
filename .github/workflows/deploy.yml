@@ -27,18 +27,49 @@ jobs:
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         port: 1337
         script: |
+          # Create directory if it doesn't exist
+          mkdir -p /home/lysnar/api.postalwiki.co.uk
           cd /home/lysnar/api.postalwiki.co.uk
-          git pull origin main
+          
+          # Initialize git if not already initialized
+          if [ ! -d .git ]; then
+            git init
+            git remote add origin ${{ secrets.REPOSITORY_URL }}
+          fi
+          
+          # Pull the latest code
+          git fetch origin
+          git reset --hard origin/main
+          
+          # Install dependencies
           npm install
+          
           # Set proper permissions
-          sudo chown -R nobody:nobody /home/lysnar/api.postalwiki.co.uk
-          sudo chmod -R 755 /home/lysnar/api.postalwiki.co.uk
+          # First, make sure lysnar owns the directory
+          chown -R lysnar:lysnar /home/lysnar/api.postalwiki.co.uk
+          # Then set permissions that allow nobody (Apache) to read
+          chmod -R 755 /home/lysnar/api.postalwiki.co.uk
           
           # Check if PM2 is installed globally
           if ! command -v pm2 &> /dev/null; then
               echo "Installing PM2 globally..."
-              sudo npm install -g pm2
+              npm install -g pm2
           fi
+          
+          # Create ecosystem file for PM2
+          cat > ecosystem.config.js << 'EOL'
+          module.exports = {
+            apps: [{
+              name: "postalwiki-api",
+              script: "npm",
+              args: "start",
+              env: {
+                NODE_ENV: "production",
+                PORT: 3000
+              }
+            }]
+          }
+          EOL
           
           # Check if the process exists
           if pm2 list | grep -q "postalwiki-api"; then
@@ -46,28 +77,10 @@ jobs:
               pm2 restart postalwiki-api
           else
               echo "Starting application for the first time..."
-              # Create ecosystem file for PM2
-              cat > ecosystem.config.js << EOL
-              module.exports = {
-                apps: [{
-                  name: "postalwiki-api",
-                  script: "npm",
-                  args: "start",
-                  env: {
-                    NODE_ENV: "production",
-                    PORT: 3000
-                  }
-                }]
-              }
-              EOL
-              
-              # Start the application
               pm2 start ecosystem.config.js
-              # Save the PM2 process list
               pm2 save
-              # Setup PM2 to start on system boot
               pm2 startup
           fi
           
-          # Reload Apache to ensure proxy settings are updated
-          sudo /usr/local/apache/bin/apachectl graceful 
+          # Reload Apache
+          /usr/local/apache/bin/apachectl graceful 
