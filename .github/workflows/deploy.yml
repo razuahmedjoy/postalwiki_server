@@ -54,14 +54,14 @@ jobs:
           # Create .env file if it doesn't exist
           if [ ! -f .env ]; then
             echo "Creating .env file..."
-            cat > .env << EOL
-            NODE_ENV=production
-            PORT=3000
-            MONGODB_URI=${{ secrets.MONGODB_URI }}
-            JWT_SECRET=${{ secrets.JWT_SECRET }}
-            JWT_EXPIRES_IN=${{ secrets.JWT_EXPIRES_IN }}
-            API_URL=${{ secrets.API_URL }}
-            EOL
+            cat > .env << 'EOL'
+NODE_ENV=production
+PORT=3000
+MONGODB_URI=${{ secrets.MONGODB_URI }}
+JWT_SECRET=${{ secrets.JWT_SECRET }}
+JWT_EXPIRES_IN=${{ secrets.JWT_EXPIRES_IN }}
+API_URL=${{ secrets.API_URL }}
+EOL
           fi
           
           # Set proper permissions
