@@ -27,6 +27,13 @@ jobs:
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         port: 1337
         script: |
+          # Install Node.js 18 if not installed
+          if ! command -v node &> /dev/null || [ "$(node -v | cut -d'v' -f2 | cut -d'.' -f1)" -lt 18 ]; then
+            echo "Installing Node.js 18..."
+            curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+            sudo apt-get install -y nodejs
+          fi
+          
           # Create directory if it doesn't exist
           mkdir -p /home/lysnar/api.postalwiki.co.uk
           cd /home/lysnar/api.postalwiki.co.uk
@@ -50,10 +57,10 @@ jobs:
           # Then set permissions that allow nobody (Apache) to read
           chmod -R 755 /home/lysnar/api.postalwiki.co.uk
           
-          # Check if PM2 is installed globally
+          # Install PM2 globally for the current user
           if ! command -v pm2 &> /dev/null; then
               echo "Installing PM2 globally..."
-              npm install -g pm2
+              npm install -g pm2 --location=global
           fi
           
           # Create ecosystem file for PM2
@@ -82,5 +89,5 @@ jobs:
               pm2 startup
           fi
           
-          # Reload Apache
-          /usr/local/apache/bin/apachectl graceful 
+          # Reload Apache (using sudo since it's required)
+          sudo /usr/local/apache/bin/apachectl graceful 
