@@ -27,12 +27,17 @@ jobs:
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         port: 1337
         script: |
-          # Install Node.js 18 if not installed
-          if ! command -v node &> /dev/null || [ "$(node -v | cut -d'v' -f2 | cut -d'.' -f1)" -lt 18 ]; then
-            echo "Installing Node.js 18..."
-            curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
-            sudo apt-get install -y nodejs
+          # Install Node.js 18 using NVM (Node Version Manager)
+          if ! command -v nvm &> /dev/null; then
+            echo "Installing NVM..."
+            curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
           fi
+          
+          # Install and use Node.js 18
+          nvm install 18
+          nvm use 18
           
           # Create directory if it doesn't exist
           mkdir -p /home/lysnar/api.postalwiki.co.uk
@@ -57,11 +62,14 @@ jobs:
           # Then set permissions that allow nobody (Apache) to read
           chmod -R 755 /home/lysnar/api.postalwiki.co.uk
           
-          # Install PM2 globally for the current user
+          # Install PM2 locally
           if ! command -v pm2 &> /dev/null; then
-              echo "Installing PM2 globally..."
-              npm install -g pm2 --location=global
+              echo "Installing PM2 locally..."
+              npm install pm2 --location=global
           fi
+          
+          # Add PM2 to PATH
+          export PATH="$HOME/.npm-global/bin:$PATH"
           
           # Create ecosystem file for PM2
           cat > ecosystem.config.js << 'EOL'
