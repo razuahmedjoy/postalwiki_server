@@ -11,14 +11,6 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     
-    - name: Set up Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: '18'
-        
-    - name: Install Dependencies
-      run: npm install
-      
     - name: Deploy to Server
       uses: appleboy/ssh-action@master
       with:
@@ -27,18 +19,6 @@ jobs:
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         port: 1337
         script: |
-          # Install Node.js 18 using NVM (Node Version Manager)
-          if ! command -v nvm &> /dev/null; then
-            echo "Installing NVM..."
-            curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
-            export NVM_DIR="$HOME/.nvm"
-            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-          fi
-          
-          # Install and use Node.js 18
-          nvm install 18
-          nvm use 18
-          
           # Create directory if it doesn't exist
           mkdir -p /home/lysnar/api.postalwiki.co.uk
           cd /home/lysnar/api.postalwiki.co.uk
@@ -53,49 +33,55 @@ jobs:
           git fetch origin
           git reset --hard origin/main
           
-          # Install dependencies
-          npm install
+          # Install Docker if not installed
+          if ! command -v docker &> /dev/null; then
+            echo "Installing Docker..."
+            sudo yum install -y yum-utils
+            sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+            sudo yum install -y docker-ce docker-ce-cli containerd.io
+            sudo systemctl start docker
+            sudo systemctl enable docker
+            sudo usermod -aG docker lysnar
+          fi
+          
+          # Install Docker Compose if not installed
+          if ! command -v docker-compose &> /dev/null; then
+            echo "Installing Docker Compose..."
+            sudo curl -L "https://github.com/docker/compose/releases/download/v2.24.5/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+            sudo chmod +x /usr/local/bin/docker-compose
+          fi
+          
+          # Create .env file if it doesn't exist
+          if [ ! -f .env ]; then
+            echo "Creating .env file..."
+            cat > .env << EOL
+            NODE_ENV=production
+            PORT=3000
+            MONGODB_URI=${{ secrets.MONGODB_URI }}
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            JWT_EXPIRES_IN=${{ secrets.JWT_EXPIRES_IN }}
+            API_URL=${{ secrets.API_URL }}
+            EOL
+          fi
           
           # Set proper permissions
-          # First, make sure lysnar owns the directory
-          chown -R lysnar:lysnar /home/lysnar/api.postalwiki.co.uk
-          # Then set permissions that allow nobody (Apache) to read
-          chmod -R 755 /home/lysnar/api.postalwiki.co.uk
+          sudo chown -R lysnar:lysnar /home/lysnar/api.postalwiki.co.uk
+          sudo chmod -R 755 /home/lysnar/api.postalwiki.co.uk
           
-          # Install PM2 locally
-          if ! command -v pm2 &> /dev/null; then
-              echo "Installing PM2 locally..."
-              npm install pm2 --location=global
+          # Build and start Docker containers
+          docker-compose down
+          docker-compose build --no-cache
+          docker-compose up -d
+          
+          # Wait for the application to start
+          sleep 10
+          
+          # Check if the application is running
+          if ! curl -s http://localhost:3000 > /dev/null; then
+            echo "Application failed to start. Checking logs..."
+            docker-compose logs
+            exit 1
           fi
           
-          # Add PM2 to PATH
-          export PATH="$HOME/.npm-global/bin:$PATH"
-          
-          # Create ecosystem file for PM2
-          cat > ecosystem.config.js << 'EOL'
-          module.exports = {
-            apps: [{
-              name: "postalwiki-api",
-              script: "npm",
-              args: "start",
-              env: {
-                NODE_ENV: "production",
-                PORT: 3000
-              }
-            }]
-          }
-          EOL
-          
-          # Check if the process exists
-          if pm2 list | grep -q "postalwiki-api"; then
-              echo "Restarting existing application..."
-              pm2 restart postalwiki-api
-          else
-              echo "Starting application for the first time..."
-              pm2 start ecosystem.config.js
-              pm2 save
-              pm2 startup
-          fi
-          
-          # Reload Apache (using sudo since it's required)
+          # Reload Apache
           sudo /usr/local/apache/bin/apachectl graceful 
