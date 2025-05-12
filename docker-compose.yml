@@ -1,20 +1,8 @@
 version: '3.8'
-
 services:
-  api:
+  app:
     build: .
-    container_name: postalwiki-api
+    container_name: postal-api
     restart: always
     ports:
       - "3000:3000"
-    environment:
-      - NODE_ENV=production
-      - PORT=3000
-    volumes:
-      - ./logs:/usr/src/app/logs
-    networks:
-      - postalwiki-network
-
-networks:
-  postalwiki-network:
-    driver: bridge 
