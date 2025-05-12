@@ -25,6 +25,7 @@ jobs:
         host: ${{ secrets.SERVER_HOST }}
         username: ${{ secrets.SERVER_USERNAME }}
         key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: 1337
         script: |
           cd /home/lysnar/api.postalwiki.co.uk
           git pull origin main
