@@ -19,9 +19,6 @@ jobs:
     - name: Install Dependencies
       run: npm install
       
-    - name: Build
-      run: npm run build
-      
     - name: Deploy to Server
       uses: appleboy/ssh-action@master
       with:
@@ -32,11 +29,44 @@ jobs:
           cd /home/lysnar/api.postalwiki.co.uk
           git pull origin main
           npm install
-          npm run build
           # Set proper permissions
           sudo chown -R nobody:nobody /home/lysnar/api.postalwiki.co.uk
           sudo chmod -R 755 /home/lysnar/api.postalwiki.co.uk
-          # Restart the application
-          pm2 restart postalwiki-api || pm2 start npm --name "postalwiki-api" -- start
+          
+          # Check if PM2 is installed globally
+          if ! command -v pm2 &> /dev/null; then
+              echo "Installing PM2 globally..."
+              sudo npm install -g pm2
+          fi
+          
+          # Check if the process exists
+          if pm2 list | grep -q "postalwiki-api"; then
+              echo "Restarting existing application..."
+              pm2 restart postalwiki-api
+          else
+              echo "Starting application for the first time..."
+              # Create ecosystem file for PM2
+              cat > ecosystem.config.js << EOL
+              module.exports = {
+                apps: [{
+                  name: "postalwiki-api",
+                  script: "npm",
+                  args: "start",
+                  env: {
+                    NODE_ENV: "production",
+                    PORT: 3000
+                  }
+                }]
+              }
+              EOL
+              
+              # Start the application
+              pm2 start ecosystem.config.js
+              # Save the PM2 process list
+              pm2 save
+              # Setup PM2 to start on system boot
+              pm2 startup
+          fi
+          
           # Reload Apache to ensure proxy settings are updated
           sudo /usr/local/apache/bin/apachectl graceful 
