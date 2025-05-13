@@ -11,7 +11,7 @@ app.use(express.json()); // Limit body size
 
 // CORS configuration - Move this before other middleware
 const corsOptions = {
-    origin: ['http://localhost:8080', 'http://localhost:8000'],
+    origin: ['http://localhost:8080', 'http://localhost:8000', 'https://admin.postalwiki.co.uk'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
     exposedHeaders: ['Content-Range', 'X-Content-Range'],
