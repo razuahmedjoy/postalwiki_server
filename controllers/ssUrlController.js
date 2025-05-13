@@ -41,6 +41,7 @@ const writeBatchLogs = (logType, urls) => {
 const importSSUrl = async (req, res) => {
     try {
         const { chunk, bucketName } = req.body;
+        const startTime = Date.now();
 
         if (!chunk || !Array.isArray(chunk) || !bucketName) {
             return res.status(400).json({
@@ -53,6 +54,8 @@ const importSSUrl = async (req, res) => {
                 resultdebug: ''
             });
         }
+
+        logger.info(`Starting import of ${chunk.length} records`);
 
         // Initialize counters and tracking arrays
         const stats = {
@@ -85,23 +88,39 @@ const importSSUrl = async (req, res) => {
             return true;
         });
 
-        // Reduce concurrency for lower resource usage
-        const concurrencyLimit = 3; // Reduced from 10 to 3
+        logger.info(`Found ${validEntries.length} valid entries out of ${chunk.length} total entries`);
+
+        // Process in smaller batches to manage memory
+        const BATCH_SIZE = 20; // Process 20 records at a time
         const entriesToInsert = [];
         const missingUrls = [];
 
-        // Process entries in smaller batches
-        for (let i = 0; i < validEntries.length; i += concurrencyLimit) {
-            const batch = validEntries.slice(i, i + concurrencyLimit);
-            
-            // Process each entry sequentially within the batch
+        for (let i = 0; i < validEntries.length; i += BATCH_SIZE) {
+            const batch = validEntries.slice(i, i + BATCH_SIZE);
+            logger.info(`Processing batch ${i/BATCH_SIZE + 1} of ${Math.ceil(validEntries.length/BATCH_SIZE)}`);
+
+            // Process each entry in the batch
             for (const csvLine of batch) {
                 const url = csvLine.url.trim();
                 const image = csvLine.image.trim();
                 const imageUrl = `https://h1m7.c11.e2-4.dev/${bucketName}/${image}`;
 
                 try {
-                    const response = await axios.head(imageUrl);
+                    const response = await axios.head(imageUrl, {
+                        timeout: 5000,
+                        maxRedirects: 2,
+                        validateStatus: function (status) {
+                            return status >= 200 && status < 500; // Accept all responses to handle them properly
+                        }
+                    });
+
+                    if (response.status === 404) {
+                        stats.notFoundCount++;
+                        stats.resultDebug.push(`Image not found at URL: ${bucketName}/${image}`);
+                        missingUrls.push(url);
+                        continue;
+                    }
+
                     const imgExists = response.status === 200 && 
                                     response.headers['content-type'] === 'image/webp';
 
@@ -126,14 +145,21 @@ const importSSUrl = async (req, res) => {
                             });
                             stats.successCount += result.length;
                             entriesToInsert.length = 0; // Clear the array
+                            logger.info(`Successfully inserted ${result.length} records`);
                         } catch (error) {
                             if (error.name === 'BulkWriteError') {
-                                stats.successCount += error.insertedDocs?.length || 0;
+                                const insertedCount = error.insertedDocs?.length || 0;
+                                stats.successCount += insertedCount;
                                 error.writeErrors?.forEach(writeError => {
+                                    if (writeError.code === 11000) { // Duplicate key error
+                                        stats.duplicateCount++;
+                                    }
                                     stats.errorMessages.push(writeError.errmsg || writeError.message);
                                 });
+                                logger.warn(`Bulk write error: ${insertedCount} inserted, ${error.writeErrors?.length || 0} errors`);
                             } else {
                                 stats.errorMessages.push(`Database error: ${error.message}`);
+                                logger.error(`Database error: ${error.message}`);
                             }
                         }
                     }
@@ -146,12 +172,16 @@ const importSSUrl = async (req, res) => {
                     } else {
                         stats.errorMessages.push(`Error checking image ${image}: ${error.message}`);
                         stats.errorsCount++;
+                        logger.error(`Error checking image ${image}: ${error.message}`);
                     }
                 }
 
-                // Add a small delay between requests to prevent overwhelming the server
+                // Add a small delay between requests
                 await new Promise(resolve => setTimeout(resolve, 100));
             }
+
+            // Log progress
+            logger.info(`Processed ${Math.min(i + BATCH_SIZE, validEntries.length)}/${validEntries.length} records`);
         }
 
         // Insert any remaining entries
@@ -162,10 +192,15 @@ const importSSUrl = async (req, res) => {
                     writeConcern: { w: 0 }
                 });
                 stats.successCount += result.length;
+                logger.info(`Inserted final ${result.length} records`);
             } catch (error) {
                 if (error.name === 'BulkWriteError') {
-                    stats.successCount += error.insertedDocs?.length || 0;
+                    const insertedCount = error.insertedDocs?.length || 0;
+                    stats.successCount += insertedCount;
                     error.writeErrors?.forEach(writeError => {
+                        if (writeError.code === 11000) {
+                            stats.duplicateCount++;
+                        }
                         stats.errorMessages.push(writeError.errmsg || writeError.message);
                     });
                 } else {
@@ -177,6 +212,11 @@ const importSSUrl = async (req, res) => {
         // Calculate final error count
         stats.errorsCount = stats.totalCount - stats.successCount - stats.notFoundCount;
 
+        const endTime = Date.now();
+        const processingTime = (endTime - startTime) / 1000; // Convert to seconds
+
+        logger.info(`Import completed in ${processingTime} seconds. Stats:`, stats);
+
         return res.json({
             status: stats.successCount > 0 ? 1 : (stats.errorMessages.some(msg => msg.includes('duplicate key')) ? 2 : 0),
             success: stats.successCount,
@@ -185,7 +225,8 @@ const importSSUrl = async (req, res) => {
             notfound: stats.notFoundCount,
             duplicates: stats.duplicateCount,
             errormessages: stats.errorMessages.join('<br>'),
-            resultdebug: stats.resultDebug.join('<br>')
+            resultdebug: stats.resultDebug.join('<br>'),
+            processingTime: `${processingTime} seconds`
         });
 
     } catch (error) {
