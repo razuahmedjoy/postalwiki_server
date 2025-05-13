@@ -1,87 +1,38 @@
-# name: Deploy to Production
+name: Sync Code to Server
 
-# on:
-#   push:
-#     branches: [ main ]
+on:
+  push:
+    branches: [ main ]
 
-# jobs:
-#   deploy:
-#     runs-on: ubuntu-latest
+jobs:
+  sync:
+    runs-on: ubuntu-latest
     
-#     steps:
-#     - uses: actions/checkout@v3
+    steps:
+    - uses: actions/checkout@v3
     
-#     - name: Deploy to Server
-#       uses: appleboy/ssh-action@master
-#       with:
-#         host: ${{ secrets.SERVER_HOST }}
-#         username: ${{ secrets.SERVER_USERNAME }}
-#         key: ${{ secrets.SSH_PRIVATE_KEY }}
-#         port: 1337
-#         script: |
-#           # Create directory if it doesn't exist
-#           mkdir -p /home/lysnar/api.postalwiki.co.uk
-#           cd /home/lysnar/api.postalwiki.co.uk
+    - name: Sync Code to Server
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.SERVER_HOST }}
+        username: ${{ secrets.SERVER_USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: 1337
+        script: |
+          # Create directory if it doesn't exist
+          mkdir -p /home/lysnar/api.postalwiki.co.uk
+          cd /home/lysnar/api.postalwiki.co.uk
           
-#           # Initialize git if not already initialized
-#           if [ ! -d .git ]; then
-#             git init
-#             git remote add origin ${{ secrets.REPOSITORY_URL }}
-#           fi
+          # Initialize git if not already initialized
+          if [ ! -d .git ]; then
+            git init
+            git remote add origin ${{ secrets.REPOSITORY_URL }}
+          fi
           
-#           # Pull the latest code
-#           git fetch origin
-#           git reset --hard origin/main
+          # Pull the latest code
+          git fetch origin
+          git reset --hard origin/main
           
-#           # Install Docker if not installed
-#           if ! command -v docker &> /dev/null; then
-#             echo "Installing Docker..."
-#             sudo yum install -y yum-utils
-#             sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
-#             sudo yum install -y docker-ce docker-ce-cli containerd.io
-#             sudo systemctl start docker
-#             sudo systemctl enable docker
-#             sudo usermod -aG docker lysnar
-#           fi
-          
-#           # Install Docker Compose if not installed
-#           if ! command -v docker-compose &> /dev/null; then
-#             echo "Installing Docker Compose..."
-#             sudo curl -L "https://github.com/docker/compose/releases/download/v2.24.5/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-#             sudo chmod +x /usr/local/bin/docker-compose
-#           fi
-          
-#           # Create .env file if it doesn't exist
-#           if [ ! -f .env ]; then
-#             echo "Creating .env file..."
-#             cat > .env << 'EOL'
-# NODE_ENV=production
-# PORT=3000
-# MONGODB_URI=${{ secrets.MONGODB_URI }}
-# JWT_SECRET=${{ secrets.JWT_SECRET }}
-# JWT_EXPIRES_IN=${{ secrets.JWT_EXPIRES_IN }}
-# API_URL=${{ secrets.API_URL }}
-# EOL
-#           fi
-          
-#           # Set proper permissions
-#           sudo chown -R lysnar:lysnar /home/lysnar/api.postalwiki.co.uk
-#           sudo chmod -R 755 /home/lysnar/api.postalwiki.co.uk
-          
-#           # Build and start Docker containers
-#           docker-compose down
-#           docker-compose build --no-cache
-#           docker-compose up -d
-          
-#           # Wait for the application to start
-#           sleep 10
-          
-#           # Check if the application is running
-#           if ! curl -s http://localhost:3000 > /dev/null; then
-#             echo "Application failed to start. Checking logs..."
-#             docker-compose logs
-#             exit 1
-#           fi
-          
-#           # Reload Apache
-#           sudo /usr/local/apache/bin/apachectl graceful 
+          # Set proper permissions
+          sudo chown -R lysnar:lysnar /home/lysnar/api.postalwiki.co.uk
+          sudo chmod -R 755 /home/lysnar/api.postalwiki.co.uk 

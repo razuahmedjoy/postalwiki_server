@@ -56,101 +56,102 @@ const importSSUrl = async (req, res) => {
 
         // Initialize counters and tracking arrays
         const stats = {
-            totalCount: 0,
+            totalCount: chunk.length,
             successCount: 0,
             errorsCount: 0,
             notFoundCount: 0,
             duplicateCount: 0,
-            errorMessages: '',
-            resultDebug: ''
+            errorMessages: [],
+            resultDebug: []
         };
 
-        const entriesToInsert = [];
-        const missingUrls = [];
-        const duplicateUrls = [];
-        const existingImages = new Set();
-
-        // Ensure log directories exist
-        // ensureLogDirectories();
-
-        // Process each entry in the chunk
-        for (const csvLine of chunk) {
-            stats.totalCount++;
-
+        // Filter out invalid entries first
+        const validEntries = chunk.filter(csvLine => {
             if (!csvLine.url || !csvLine.image) {
-                stats.errorMessages += 'Line without URL or Image found.<br>';
+                stats.errorMessages.push('Line without URL or Image found.');
                 stats.errorsCount++;
-                continue;
+                return false;
             }
 
             const url = csvLine.url.trim();
             const image = csvLine.image.trim();
 
             if (!url || !image) {
-                stats.errorMessages += `URL or Image empty:<br>URL: ${url} | Image: ${image}<br>`;
+                stats.errorMessages.push(`URL or Image empty: URL: ${url} | Image: ${image}`);
                 stats.errorsCount++;
-                continue;
+                return false;
             }
 
-            // Check for duplicates
-            if (existingImages.has(image)) {
-                duplicateUrls.push(image);
-                stats.duplicateCount++;
-                continue;
-            }
-            existingImages.add(image);
+            return true;
+        });
 
-            // Check if the image exists using axios
-            try {
+        // Process image checks in parallel with a concurrency limit
+        const concurrencyLimit = 10; // Adjust based on your server capacity
+        const entriesToInsert = [];
+        const missingUrls = [];
+
+        // Process entries in batches
+        for (let i = 0; i < validEntries.length; i += concurrencyLimit) {
+            const batch = validEntries.slice(i, i + concurrencyLimit);
+            const batchPromises = batch.map(async (csvLine) => {
+                const url = csvLine.url.trim();
+                const image = csvLine.image.trim();
                 const imageUrl = `https://h1m7.c11.e2-4.dev/${bucketName}/${image}`;
-                const response = await axios.head(imageUrl);
-                
-                const imgExists = response.status === 200 && 
-                                response.headers['content-type'] === 'image/webp';
 
-                if (!imgExists) {
-                    stats.notFoundCount++;
-                    stats.resultDebug += `Image not a WebP image: ${bucketName}/${image}<br>`;
-                    missingUrls.push(url);
-                    continue;
+                try {
+                    const response = await axios.head(imageUrl);
+                    const imgExists = response.status === 200 && 
+                                    response.headers['content-type'] === 'image/webp';
+
+                    if (!imgExists) {
+                        stats.notFoundCount++;
+                        stats.resultDebug.push(`Image not a WebP image: ${bucketName}/${image}`);
+                        missingUrls.push(url);
+                        return null;
+                    }
+
+                    return {
+                        url,
+                        image: `${bucketName}/${image}`
+                    };
+                } catch (error) {
+                    if (error.response?.status === 404) {
+                        stats.notFoundCount++;
+                        stats.resultDebug.push(`Image not found at URL: ${bucketName}/${image}`);
+                        missingUrls.push(url);
+                    } else {
+                        stats.errorMessages.push(`Error checking image ${image}: ${error.message}`);
+                        stats.errorsCount++;
+                    }
+                    return null;
                 }
+            });
 
-                entriesToInsert.push({
-                    url,
-                    image: `${bucketName}/${image}`
-                });
-
-            } catch (error) {
-                if (error.response && error.response.status === 404) {
-                    stats.notFoundCount++;
-                    stats.resultDebug += `Image not found at URL: ${bucketName}/${image}<br>`;
-                    missingUrls.push(url);
-                } else {
-                    stats.errorMessages += `Error checking image ${image}: ${error.message}<br>`;
-                    stats.errorsCount++;
-                }
-            }
+            const batchResults = await Promise.all(batchPromises);
+            entriesToInsert.push(...batchResults.filter(Boolean));
         }
 
-        // Batch write logs
-        // writeBatchLogs('missing_urls', missingUrls);
-        // writeBatchLogs('duplicate_urls', duplicateUrls);
-
-        // Insert valid entries into MongoDB
+        // Insert valid entries into MongoDB in batches
         if (entriesToInsert.length > 0) {
             try {
-                const result = await ScreenshotUrl.insertMany(entriesToInsert, { ordered: false });
+                const result = await ScreenshotUrl.insertMany(entriesToInsert, { 
+                    ordered: false,
+                    writeConcern: { w: 0 } // Fire and forget for better performance
+                });
+                
                 stats.successCount = result.length;
+                logger.info(`Inserted ${result.length} documents`);
+                logger.info(`Missing ${missingUrls.length} documents`);
 
             } catch (error) {
                 if (error.name === 'BulkWriteError') {
                     stats.successCount = error.insertedDocs?.length || 0;
-                    for (const writeError of error.writeErrors || []) {
-                        stats.errorMessages += `${writeError.errmsg || writeError.message}<br>`;
-                    }
+                    error.writeErrors?.forEach(writeError => {
+                        stats.errorMessages.push(writeError.errmsg || writeError.message);
+                    });
                     stats.errorsCount = stats.totalCount - stats.successCount - stats.notFoundCount;
                 } else {
-                    stats.errorMessages += `Database error: ${error.message}<br>`;
+                    stats.errorMessages.push(`Database error: ${error.message}`);
                     stats.errorsCount = stats.totalCount - stats.notFoundCount;
                 }
             }
@@ -159,18 +160,18 @@ const importSSUrl = async (req, res) => {
         }
 
         return res.json({
-            status: stats.successCount > 0 ? 1 : (stats.errorMessages.includes('duplicate key') ? 2 : 0),
+            status: stats.successCount > 0 ? 1 : (stats.errorMessages.some(msg => msg.includes('duplicate key')) ? 2 : 0),
             success: stats.successCount,
             errors: stats.errorsCount,
             totalcount: stats.totalCount,
             notfound: stats.notFoundCount,
             duplicates: stats.duplicateCount,
-            errormessages: stats.errorMessages,
-            resultdebug: stats.resultDebug
+            errormessages: stats.errorMessages.join('<br>'),
+            resultdebug: stats.resultDebug.join('<br>')
         });
 
     } catch (error) {
-        
+        logger.error(`Server error in importSSUrl: ${error.message}`);
         return res.status(500).json({
             status: 0,
             success: 0,

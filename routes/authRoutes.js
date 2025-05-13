@@ -15,9 +15,5 @@ router.get('/profile', verifyToken, (req, res) => {
     res.json({ message: 'Welcome to your profile', user: req.user });
 });
 
-// ✅ admin-only route example
-router.get('/admin', verifyToken, authorizeRoles('admin'), (req, res) => {
-    res.json({ message: 'Welcome admin!' });
-});
 
 module.exports = router;

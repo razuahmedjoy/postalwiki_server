@@ -3,6 +3,9 @@ const cors = require('cors');
 
 const authRoutes = require('./routes/authRoutes');
 const ssUrlRoutes = require('./routes/ssurlRoutes');
+const { verifyToken } = require('./middlewares/authmiddleware');
+const { authorizeRoles } = require('./middlewares/rolemiddleware');
+const { getCollectionStats } = require('./controllers/collectionController');
 
 const app = express();
 
@@ -11,7 +14,7 @@ app.use(express.json()); // Limit body size
 
 // CORS configuration - Move this before other middleware
 const corsOptions = {
-    origin: ['http://localhost:8080', 'http://localhost:8000', 'https://admin.postalwiki.co.uk'],
+    origin: ['http://localhost:5173', 'http://localhost:5173', 'https://admin.postalwiki.co.uk'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
     exposedHeaders: ['Content-Range', 'X-Content-Range'],
@@ -25,7 +28,14 @@ app.use(cors(corsOptions));
 
 // api routes
 app.use('/api', authRoutes);
-app.use('/api/ss-url', ssUrlRoutes);
+app.use('/api/stats', getCollectionStats);
+app.use('/api/ss-url', verifyToken, authorizeRoles('admin'), ssUrlRoutes);
+
+// ✅ admin-only route example
+app.get('/admin', verifyToken, authorizeRoles('admin'), (req, res) => {
+    res.json({ message: 'Welcome admin!' });
+});
+
 
 // Error handling middleware
 app.use((err, req, res, next) => {

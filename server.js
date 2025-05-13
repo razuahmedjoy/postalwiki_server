@@ -17,8 +17,7 @@ const startServer = async () => {
         });
 
         // Set timeout for server
-        server.timeout = 30000; // 30 seconds
-        server.keepAliveTimeout = 30000; // 30 seconds
+
 
         // Handle server errors
         server.on('error', (error) => {
