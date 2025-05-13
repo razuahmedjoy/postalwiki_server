@@ -85,15 +85,17 @@ const importSSUrl = async (req, res) => {
             return true;
         });
 
-        // Process image checks in parallel with a concurrency limit
-        const concurrencyLimit = 10; // Adjust based on your server capacity
+        // Reduce concurrency for lower resource usage
+        const concurrencyLimit = 3; // Reduced from 10 to 3
         const entriesToInsert = [];
         const missingUrls = [];
 
-        // Process entries in batches
+        // Process entries in smaller batches
         for (let i = 0; i < validEntries.length; i += concurrencyLimit) {
             const batch = validEntries.slice(i, i + concurrencyLimit);
-            const batchPromises = batch.map(async (csvLine) => {
+            
+            // Process each entry sequentially within the batch
+            for (const csvLine of batch) {
                 const url = csvLine.url.trim();
                 const image = csvLine.image.trim();
                 const imageUrl = `https://h1m7.c11.e2-4.dev/${bucketName}/${image}`;
@@ -107,13 +109,35 @@ const importSSUrl = async (req, res) => {
                         stats.notFoundCount++;
                         stats.resultDebug.push(`Image not a WebP image: ${bucketName}/${image}`);
                         missingUrls.push(url);
-                        return null;
+                        continue;
                     }
 
-                    return {
+                    entriesToInsert.push({
                         url,
                         image: `${bucketName}/${image}`
-                    };
+                    });
+
+                    // Insert in smaller chunks to reduce memory usage
+                    if (entriesToInsert.length >= 50) {
+                        try {
+                            const result = await ScreenshotUrl.insertMany(entriesToInsert, { 
+                                ordered: false,
+                                writeConcern: { w: 0 }
+                            });
+                            stats.successCount += result.length;
+                            entriesToInsert.length = 0; // Clear the array
+                        } catch (error) {
+                            if (error.name === 'BulkWriteError') {
+                                stats.successCount += error.insertedDocs?.length || 0;
+                                error.writeErrors?.forEach(writeError => {
+                                    stats.errorMessages.push(writeError.errmsg || writeError.message);
+                                });
+                            } else {
+                                stats.errorMessages.push(`Database error: ${error.message}`);
+                            }
+                        }
+                    }
+
                 } catch (error) {
                     if (error.response?.status === 404) {
                         stats.notFoundCount++;
@@ -123,41 +147,35 @@ const importSSUrl = async (req, res) => {
                         stats.errorMessages.push(`Error checking image ${image}: ${error.message}`);
                         stats.errorsCount++;
                     }
-                    return null;
                 }
-            });
 
-            const batchResults = await Promise.all(batchPromises);
-            entriesToInsert.push(...batchResults.filter(Boolean));
+                // Add a small delay between requests to prevent overwhelming the server
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
         }
 
-        // Insert valid entries into MongoDB in batches
+        // Insert any remaining entries
         if (entriesToInsert.length > 0) {
             try {
                 const result = await ScreenshotUrl.insertMany(entriesToInsert, { 
                     ordered: false,
-                    writeConcern: { w: 0 } // Fire and forget for better performance
+                    writeConcern: { w: 0 }
                 });
-                
-                stats.successCount = result.length;
-                logger.info(`Inserted ${result.length} documents`);
-                logger.info(`Missing ${missingUrls.length} documents`);
-
+                stats.successCount += result.length;
             } catch (error) {
                 if (error.name === 'BulkWriteError') {
-                    stats.successCount = error.insertedDocs?.length || 0;
+                    stats.successCount += error.insertedDocs?.length || 0;
                     error.writeErrors?.forEach(writeError => {
                         stats.errorMessages.push(writeError.errmsg || writeError.message);
                     });
-                    stats.errorsCount = stats.totalCount - stats.successCount - stats.notFoundCount;
                 } else {
                     stats.errorMessages.push(`Database error: ${error.message}`);
-                    stats.errorsCount = stats.totalCount - stats.notFoundCount;
                 }
             }
-        } else {
-            stats.errorsCount = stats.totalCount - stats.notFoundCount;
         }
+
+        // Calculate final error count
+        stats.errorsCount = stats.totalCount - stats.successCount - stats.notFoundCount;
 
         return res.json({
             status: stats.successCount > 0 ? 1 : (stats.errorMessages.some(msg => msg.includes('duplicate key')) ? 2 : 0),
