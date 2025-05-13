@@ -31,8 +31,4 @@ jobs:
           
           # Pull the latest code
           git fetch origin
-          git reset --hard origin/main
-          
-          # Set proper permissions
-          sudo chown -R lysnar:lysnar /home/lysnar/api.postalwiki.co.uk
-          sudo chmod -R 755 /home/lysnar/api.postalwiki.co.uk 
+          git reset --hard origin/main 
