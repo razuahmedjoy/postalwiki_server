@@ -9,7 +9,7 @@ const screenshotUrlSchema = new mongoose.Schema({
 
     
 },{
- 
+    collection: 'screenshot_url',
     versionKey: false
 });
 
