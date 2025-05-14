@@ -30,11 +30,7 @@ app.use(cors(corsOptions));
 // Handle preflight requests explicitly
 app.options('*', cors(corsOptions));
 
-// Add request logging
-app.use((req, res, next) => {
-    console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
-    next();
-});
+
 
 // Add timeout handling
 app.use((req, res, next) => {

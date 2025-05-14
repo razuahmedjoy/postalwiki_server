@@ -39,207 +39,6 @@ const writeBatchLogs = (logType, urls) => {
 };
 
 const importSSUrl = async (req, res) => {
-    // try {
-    //     const { chunk, bucketName } = req.body;
-    //     const startTime = Date.now();
-
-    //     if (!chunk || !Array.isArray(chunk) || !bucketName) {
-    //         return res.status(400).json({
-    //             status: 0,
-    //             success: 0,
-    //             errors: 0,
-    //             totalcount: 0,
-    //             notfound: 0,
-    //             errormessages: 'Invalid request data',
-    //             resultdebug: ''
-    //         });
-    //     }
-
-    //     logger.info(`Starting import of ${chunk.length} records`);
-
-    //     // Initialize counters and tracking arrays
-    //     const stats = {
-    //         totalCount: chunk.length,
-    //         successCount: 0,
-    //         errorsCount: 0,
-    //         notFoundCount: 0,
-    //         duplicateCount: 0,
-    //         errorMessages: [],
-    //         resultDebug: []
-    //     };
-
-    //     // Filter out invalid entries first
-    //     const validEntries = chunk.filter(csvLine => {
-    //         if (!csvLine.url || !csvLine.image) {
-    //             stats.errorMessages.push('Line without URL or Image found.');
-    //             stats.errorsCount++;
-    //             return false;
-    //         }
-
-    //         const url = csvLine.url.trim();
-    //         const image = csvLine.image.trim();
-
-    //         if (!url || !image) {
-    //             stats.errorMessages.push(`URL or Image empty: URL: ${url} | Image: ${image}`);
-    //             stats.errorsCount++;
-    //             return false;
-    //         }
-
-    //         return true;
-    //     });
-
-    //     logger.info(`Found ${validEntries.length} valid entries out of ${chunk.length} total entries`);
-
-    //     // Process in smaller batches to manage memory
-    //     const BATCH_SIZE = 5; // Process 5 records at a time
-    //     const entriesToInsert = [];
-    //     const missingUrls = [];
-
-    //     for (let i = 0; i < validEntries.length; i += BATCH_SIZE) {
-    //         const batch = validEntries.slice(i, i + BATCH_SIZE);
-    //         logger.info(`Processing batch ${i/BATCH_SIZE + 1} of ${Math.ceil(validEntries.length/BATCH_SIZE)}`);
-
-    //         // Process each entry in the batch
-    //         for (const csvLine of batch) {
-    //             const url = csvLine.url.trim();
-    //             const image = csvLine.image.trim();
-    //             const imageUrl = `https://h1m7.c11.e2-4.dev/${bucketName}/${image}`;
-
-    //             try {
-    //                 const response = await axios.head(imageUrl, {
-    //                     timeout: 5000,
-    //                     maxRedirects: 2,
-    //                     validateStatus: function (status) {
-    //                         return status >= 200 && status < 500;
-    //                     }
-    //                 });
-
-    //                 if (response.status === 404) {
-    //                     stats.notFoundCount++;
-    //                     stats.resultDebug.push(`Image not found at URL: ${bucketName}/${image}`);
-    //                     missingUrls.push(url);
-    //                     continue;
-    //                 }
-
-    //                 const imgExists = response.status === 200 && 
-    //                                 response.headers['content-type'] === 'image/webp';
-
-    //                 if (!imgExists) {
-    //                     stats.notFoundCount++;
-    //                     stats.resultDebug.push(`Image not a WebP image: ${bucketName}/${image}`);
-    //                     missingUrls.push(url);
-    //                     continue;
-    //                 }
-
-    //                 entriesToInsert.push({
-    //                     url,
-    //                     image: `${bucketName}/${image}`
-    //                 });
-
-    //                 // Insert in smaller chunks to reduce memory usage
-    //                 if (entriesToInsert.length >= 20) {
-    //                     try {
-    //                         const result = await ScreenshotUrl.insertMany(entriesToInsert, { 
-    //                             ordered: false,
-    //                             writeConcern: { w: 0 }
-    //                         });
-    //                         stats.successCount += result.length;
-    //                         entriesToInsert.length = 0; // Clear the array
-    //                         logger.info(`Successfully inserted ${result.length} records`);
-    //                     } catch (error) {
-    //                         if (error.name === 'BulkWriteError') {
-    //                             const insertedCount = error.insertedDocs?.length || 0;
-    //                             stats.successCount += insertedCount;
-    //                             error.writeErrors?.forEach(writeError => {
-    //                                 if (writeError.code === 11000) {
-    //                                     stats.duplicateCount++;
-    //                                 }
-    //                                 stats.errorMessages.push(writeError.errmsg || writeError.message);
-    //                             });
-    //                         } else {
-    //                             stats.errorMessages.push(`Database error: ${error.message}`);
-    //                         }
-    //                     }
-    //                 }
-
-    //             } catch (error) {
-    //                 if (error.response?.status === 404) {
-    //                     stats.notFoundCount++;
-    //                     stats.resultDebug.push(`Image not found at URL: ${bucketName}/${image}`);
-    //                     missingUrls.push(url);
-    //                 } else {
-    //                     stats.errorMessages.push(`Error checking image ${image}: ${error.message}`);
-    //                     stats.errorsCount++;
-    //                     logger.error(`Error checking image ${image}: ${error.message}`);
-    //                 }
-    //             }
-
-    //             // Add a small delay between requests
-    //             await new Promise(resolve => setTimeout(resolve, 100));
-    //         }
-
-    //         // Log progress
-    //         logger.info(`Processed ${Math.min(i + BATCH_SIZE, validEntries.length)}/${validEntries.length} records`);
-    //     }
-
-    //     // Insert any remaining entries
-    //     if (entriesToInsert.length > 0) {
-    //         try {
-    //             const result = await ScreenshotUrl.insertMany(entriesToInsert, { 
-    //                 ordered: false,
-    //                 writeConcern: { w: 0 }
-    //             });
-    //             stats.successCount += result.length;
-    //             logger.info(`Inserted final ${result.length} records`);
-    //         } catch (error) {
-    //             if (error.name === 'BulkWriteError') {
-    //                 const insertedCount = error.insertedDocs?.length || 0;
-    //                 stats.successCount += insertedCount;
-    //                 error.writeErrors?.forEach(writeError => {
-    //                     if (writeError.code === 11000) {
-    //                         stats.duplicateCount++;
-    //                     }
-    //                     stats.errorMessages.push(writeError.errmsg || writeError.message);
-    //                 });
-    //             } else {
-    //                 stats.errorMessages.push(`Database error: ${error.message}`);
-    //             }
-    //         }
-    //     }
-
-    //     // Calculate final error count
-    //     stats.errorsCount = stats.totalCount - stats.successCount - stats.notFoundCount;
-
-    //     const endTime = Date.now();
-    //     const processingTime = (endTime - startTime) / 1000;
-
-    //     logger.info(`Import completed in ${processingTime} seconds. Stats:`, stats);
-
-    //     return res.json({
-    //         status: stats.successCount > 0 ? 1 : (stats.errorMessages.some(msg => msg.includes('duplicate key')) ? 2 : 0),
-    //         success: stats.successCount,
-    //         errors: stats.errorsCount,
-    //         totalcount: stats.totalCount,
-    //         notfound: stats.notFoundCount,
-    //         duplicates: stats.duplicateCount,
-    //         errormessages: stats.errorMessages.join('<br>'),
-    //         resultdebug: stats.resultDebug.join('<br>'),
-    //         processingTime: `${processingTime} seconds`
-    //     });
-
-    // } catch (error) {
-    //     logger.error(`Server error in importSSUrl: ${error.message}`);
-    //     return res.status(500).json({
-    //         status: 0,
-    //         success: 0,
-    //         errors: 1,
-    //         totalcount: 1,
-    //         notfound: 0,
-    //         errormessages: `Server error: ${error.message}`,
-    //         resultdebug: ''
-    //     });
-    // }
-
     try {
         const { chunk, bucketName } = req.body;
 
@@ -255,6 +54,9 @@ const importSSUrl = async (req, res) => {
             });
         }
 
+        // Set a longer timeout for this route
+        req.setTimeout(30000); // 30 seconds timeout
+
         let totalCount = 0;
         let successCount = 0;
         let errorsCount = 0;
@@ -263,106 +65,110 @@ const importSSUrl = async (req, res) => {
         let resultDebug = [];
 
         const entriesToInsert = [];
+        const processedUrls = new Set(); // Track processed URLs to avoid duplicates
 
-        // Validate and process each entry in the chunk
-        for (const csvLine of chunk) {
-            totalCount++;
-
-            if (!csvLine.url || !csvLine.image) {
-                errorMessages.push(`Line without URL or Image found.`);
-                errorsCount++;
-                continue;
-            }
-
-            const url = csvLine.url.trim();
-            const image = csvLine.image.trim();
-
-            if (!url || !image) {
-                errorMessages.push(`URL or Image empty: URL: ${url} | Image: ${image}`);
-                errorsCount++;
-                continue;
-            }
-
-            // In a real implementation, you would check if the image exists
-            // For now we'll simulate with a simple check
-            try {
-                const imageUrl = `https://h1m7.c11.e2-4.dev/${bucketName}/${image}`;
-
-
-                const response = await axios.head(imageUrl, {
-                    timeout: 5000,
-                    maxRedirects: 2,
-                    validateStatus: function (status) {
-                        return status >= 200 && status < 500;
-                    }
-                });
-
-                if (response.status === 404) {
-                    notFoundCount++;
-                    resultDebug.push(`Image not found at URL: ${bucketName}/${image}`);
-                    continue;
-                }
-
-                const imgExists = response.status === 200 &&
-                    response.headers['content-type'] === 'image/webp';
-
-
-                if (!imgExists) {
-                    notFoundCount++;
-                    resultDebug.push(`Image not found: ${bucketName}/${image}`);
-                    continue;
-                }
-
-                // If image exists, prepare it for insertion
-                entriesToInsert.push({
-                    url,
-                    image: `${bucketName}/${image}`
-                });
-
+        // Process entries in smaller batches
+        const BATCH_SIZE = 10;
+        for (let i = 0; i < chunk.length; i += BATCH_SIZE) {
+            const batch = chunk.slice(i, i + BATCH_SIZE);
             
-            } catch (error) {
-                notFoundCount++;
-                errorMessages.push(`Image not found: ${bucketName}/${image}: ${error.message}`);
-            }
-        }
+            // Process batch concurrently with Promise.all
+            await Promise.all(batch.map(async (csvLine) => {
+                totalCount++;
 
-        // Insert valid entries into MongoDB
-        if (entriesToInsert.length > 0) {
-            try {
-                // Using insertMany with ordered: false to continue on error
-                const result = await ScreenshotUrl.insertMany(entriesToInsert, { ordered: false });
-                successCount = result.length;
-            } catch (error) {
-                // Handle duplicate key errors (code 11000)
-                if (error.name === 'BulkWriteError') {
-                    // Some documents were inserted successfully
-                    successCount = error.insertedDocs?.length || 0;
+                if (!csvLine.url || !csvLine.image) {
+                    errorMessages.push(`Line without URL or Image found.`);
+                    errorsCount++;
+                    return;
+                }
 
-                    // Parse error messages
-                    for (const writeError of error.writeErrors || []) {
-                        errorMessages.push(`${writeError.errmsg || writeError.message}`);
+                const url = csvLine.url.trim();
+                const image = csvLine.image.trim();
+
+                if (!url || !image) {
+                    errorMessages.push(`URL or Image empty: URL: ${url} | Image: ${image}`);
+                    errorsCount++;
+                    return;
+                }
+
+                // Skip if URL was already processed
+                if (processedUrls.has(url)) {
+                    return;
+                }
+                processedUrls.add(url);
+
+                try {
+                    const imageUrl = `https://h1m7.c11.e2-4.dev/${bucketName}/${image}`;
+                    const response = await axios.head(imageUrl, {
+                        timeout: 5000,
+                        maxRedirects: 2,
+                        validateStatus: function (status) {
+                            return status >= 200 && status < 500;
+                        }
+                    });
+
+                    if (response.status === 404) {
+                        notFoundCount++;
+                        resultDebug.push(`Image not found at URL: ${bucketName}/${image}`);
+                        return;
                     }
 
-                    errorsCount = totalCount - successCount - notFoundCount;
-                } else {
-                    // Other errors
-                    errorMessages.push(`Database error: ${error.message}`);
-                    errorsCount = totalCount - notFoundCount;
+                    const imgExists = response.status === 200 &&
+                        response.headers['content-type'] === 'image/webp';
+
+                    if (!imgExists) {
+                        notFoundCount++;
+                        resultDebug.push(`Image not a WebP image: ${bucketName}/${image}`);
+                        return;
+                    }
+
+                    entriesToInsert.push({
+                        url,
+                        image: `${bucketName}/${image}`
+                    });
+
+                } catch (error) {
+                    notFoundCount++;
+                    errorMessages.push(`Error checking image ${image}: ${error.message}`);
+                }
+            }));
+
+            // Insert batch if we have entries
+            if (entriesToInsert.length > 0) {
+                try {
+                    const result = await ScreenshotUrl.insertMany(entriesToInsert, { 
+                        ordered: false,
+                        writeConcern: { w: 0 }
+                    });
+                    successCount += result.length;
+                    entriesToInsert.length = 0; // Clear the array
+                } catch (error) {
+                    if (error.name === 'BulkWriteError') {
+                        successCount += error.insertedDocs?.length || 0;
+                        error.writeErrors?.forEach(writeError => {
+                            errorMessages.push(writeError.errmsg || writeError.message);
+                        });
+                    } else {
+                        errorMessages.push(`Database error: ${error.message}`);
+                    }
                 }
             }
-        } else {
-            errorsCount = totalCount - notFoundCount;
+
+            // Add a small delay between batches
+            await new Promise(resolve => setTimeout(resolve, 100));
         }
 
-        // Return response in same format as PHP example
+        // Calculate final error count
+        errorsCount = totalCount - successCount - notFoundCount;
+
         return res.json({
-            status: successCount > 0 ? 1 : (errorMessages.includes('duplicate key') ? 2 : 0),
+            status: successCount > 0 ? 1 : (errorMessages.some(msg => msg.includes('duplicate key')) ? 2 : 0),
             success: successCount,
             errors: errorsCount,
             totalcount: totalCount,
             notfound: notFoundCount,
-            errormessages: errorMessages,
-            resultdebug: resultDebug
+            errormessages: errorMessages.join('<br>'),
+            resultdebug: resultDebug.join('<br>')
         });
 
     } catch (error) {
@@ -377,7 +183,6 @@ const importSSUrl = async (req, res) => {
             resultdebug: ''
         });
     }
-
 }
 
 const totalCount = async (req, res) => {
