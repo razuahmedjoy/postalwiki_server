@@ -20,7 +20,8 @@ const corsOptions = {
     exposedHeaders: ['Content-Range', 'X-Content-Range'],
     credentials: true,
     preflightContinue: false,
-    optionsSuccessStatus: 204
+    optionsSuccessStatus: 204,
+    maxAge: 86400 // 24 hours
 };
 
 // Apply CORS middleware
@@ -46,7 +47,7 @@ app.use((req, res, next) => {
 
 // api routes
 app.use('/api', authRoutes);
-app.use('/api/stats', getCollectionStats);
+app.get('/api/stats', getCollectionStats);
 app.use('/api/ss-url', verifyToken, authorizeRoles('admin'), ssUrlRoutes);
 
 // ✅ admin-only route example
