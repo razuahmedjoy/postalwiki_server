@@ -186,7 +186,11 @@ const importSSUrl = async (req, res) => {
 }
 
 const totalCount = async (req, res) => {
-    const count = await ScreenshotUrl.countDocuments();
+    const result = await ScreenshotUrl.aggregate([
+        { $count: "total" }
+    ]);
+    
+    const count = result[0]?.total || 0;
 
     res.json({
         collectionName: 'screenshotUrls',
