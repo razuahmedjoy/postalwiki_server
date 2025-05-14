@@ -13,7 +13,7 @@ exports.register = async (req, res) => {
         const user = new User({
             username: validated.username,
             password: hashedPassword,
-            role: 'admin',
+            role: 'user',
         });
         await user.save();
         res.status(201).json({ message: 'User registered successfully' });
