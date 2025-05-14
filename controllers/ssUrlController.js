@@ -91,7 +91,7 @@ const importSSUrl = async (req, res) => {
         logger.info(`Found ${validEntries.length} valid entries out of ${chunk.length} total entries`);
 
         // Process in smaller batches to manage memory
-        const BATCH_SIZE = 20; // Process 20 records at a time
+        const BATCH_SIZE = 5; // Process 20 records at a time
         const entriesToInsert = [];
         const missingUrls = [];
 
@@ -136,33 +136,7 @@ const importSSUrl = async (req, res) => {
                         image: `${bucketName}/${image}`
                     });
 
-                    // Insert in smaller chunks to reduce memory usage
-                    if (entriesToInsert.length >= 50) {
-                        try {
-                            const result = await ScreenshotUrl.insertMany(entriesToInsert, { 
-                                ordered: false,
-                                writeConcern: { w: 0 }
-                            });
-                            stats.successCount += result.length;
-                            entriesToInsert.length = 0; // Clear the array
-                            logger.info(`Successfully inserted ${result.length} records`);
-                        } catch (error) {
-                            if (error.name === 'BulkWriteError') {
-                                const insertedCount = error.insertedDocs?.length || 0;
-                                stats.successCount += insertedCount;
-                                error.writeErrors?.forEach(writeError => {
-                                    if (writeError.code === 11000) { // Duplicate key error
-                                        stats.duplicateCount++;
-                                    }
-                                    stats.errorMessages.push(writeError.errmsg || writeError.message);
-                                });
-                                logger.warn(`Bulk write error: ${insertedCount} inserted, ${error.writeErrors?.length || 0} errors`);
-                            } else {
-                                stats.errorMessages.push(`Database error: ${error.message}`);
-                                logger.error(`Database error: ${error.message}`);
-                            }
-                        }
-                    }
+           
 
                 } catch (error) {
                     if (error.response?.status === 404) {
