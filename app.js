@@ -15,7 +15,7 @@ app.use(express.json({ limit: '50mb' })); // Increased limit for large requests
 
 // CORS configuration - Move this before other middleware
 const corsOptions = {
-    origin: ['http://localhost:5173', 'https://admin.postalwiki.co.uk', 'https://api.postalwiki.co.uk'],
+    origin: ['https://admin.postalwiki.co.uk', 'admin.postalwiki.co.uk', 'https://api.postalwiki.co.uk'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
     exposedHeaders: ['Content-Range', 'X-Content-Range'],
