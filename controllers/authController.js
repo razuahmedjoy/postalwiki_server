@@ -58,16 +58,20 @@ exports.login = async (req, res) => {
 
 exports.me = async (req, res) => {
     //   get user from database
-    const user = await User.findById(req.user.id).select('-password');
-    res.json({
-        status: 1,
-        message: 'Current user info retrieved successfully',
-        user: {
-            id: user._id,
-            username: user.username,
-            role: user.role,
-            email: user.username,
-        },
-    });
+    try {
+        const user = await User.findById(req.user.id).select('-password');
+        res.json({
+            status: 1,
+            message: 'Current user info retrieved successfully',
+            user: {
+                id: user._id,
+                username: user.username,
+                role: user.role,
+                email: user.username,
+            },
+        });
+    } catch (error) {
+        return res.status(401).json({ message: 'Unauthorized' });
+    }
 };
 

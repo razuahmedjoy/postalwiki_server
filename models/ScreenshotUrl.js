@@ -7,10 +7,9 @@ const screenshotUrlSchema = new mongoose.Schema({
     url: { type: String, required: true },
     image: { type: String, required: true, unique: true }
 }, {
-    collection: 'screenshot_url',
     versionKey: false
 });
 
 screenshotUrlSchema.index({ image: 1 }, { name: 'image_1' });
 
-module.exports = mongoose.model('ScreenshotUrl', screenshotUrlSchema);
+module.exports = mongoose.model('screenshot_url', screenshotUrlSchema);
