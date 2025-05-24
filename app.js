@@ -15,7 +15,7 @@ app.use(express.json({ limit: '50mb' })); // Increased limit for large requests
 
 // CORS configuration - Move this before other middleware
 const corsOptions = {
-    origin: ['https://admin.postalwiki.co.uk', 'https://api.postalwiki.co.uk'],
+    origin: ['http://localhost:5173', 'https://admin.postalwiki.co.uk', 'https://api.postalwiki.co.uk'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
     exposedHeaders: ['Content-Range', 'X-Content-Range'],
@@ -40,11 +40,11 @@ app.use((req, res, next) => {
     next();
 });
 
+app.use('/api', authRoutes);
 // Public routes (no auth required)
-app.use('/api/public', publicRoutes);
+// app.use('/api/public', publicRoutes);
 
 // Protected routes
-app.use('/api', authRoutes);
 app.get('/api/stats', getCollectionStats);
 app.use('/api/ss-url', verifyToken, authorizeRoles('admin'), ssUrlRoutes);
 app.use('/api/social-scrape', verifyToken, authorizeRoles('admin'), socialScrapeRoutes);
