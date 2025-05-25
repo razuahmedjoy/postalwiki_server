@@ -35,7 +35,8 @@ const processFiles = async (files) => {
 
 const getStats = async (req, res) => {
     try {
-        const stats = await SocialScrapeService.getCollectionStats();
+        // Use estimatedDocumentCount instead of countDocuments for better performance
+        const stats = await SocialScrape.estimatedDocumentCount();
         res.json({ success: true, stats });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
