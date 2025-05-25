@@ -20,15 +20,7 @@ const connectDB = async () => {
         logger.info(`Connected to database: ${mongoose.connection.db.databaseName}`);
         logger.info(`Connection host: ${mongoose.connection.host}`);
         
-        // Test write permissions
-        try {
-            const testCollection = mongoose.connection.db.collection('permission_test');
-            await testCollection.insertOne({ test: 'test' });
-            await testCollection.deleteOne({ test: 'test' });
-            logger.info('Write permissions test successful');
-        } catch (error) {
-            logger.error('Write permissions test failed:', error.message);
-        }
+      
 
     } catch (err) {
         logger.error(`MongoDB connection error: ${err.message}`);

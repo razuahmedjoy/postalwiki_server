@@ -10,5 +10,6 @@ router.get('/progress', SocialScrapeController.getImportProgress);
 // Protected routes (auth required)
 router.post('/import', SocialScrapeController.startImport);
 router.get('/stats', SocialScrapeController.getStats);
+router.get('/paginated', SocialScrapeController.getPaginatedSocialScrapes);
 
 module.exports = router;

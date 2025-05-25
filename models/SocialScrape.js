@@ -17,6 +17,7 @@ const socialScrapeSchema = new mongoose.Schema({
   keywords: String,
   statusCode: String,
   redirect_url: String,
+  meta_description: String,
 }, { timestamps: true, collection: 'socialscrapes', strict: false });
 
 // Compound index for unique url + date combination
