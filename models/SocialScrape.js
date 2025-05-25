@@ -17,9 +17,22 @@ const socialScrapeSchema = new mongoose.Schema({
   keywords: String,
   statusCode: String,
   redirect_url: String,
-}, { timestamps: true });
+}, { timestamps: true, collection: 'social_scrapes', strict: false });
 
 // Compound index for unique url + date combination
-socialScrapeSchema.index({ url: 1, date: 1 }, { unique: true });
+socialScrapeSchema.index({ url: 1, date: 1 }, { unique: true, background: true });
 
-module.exports = mongoose.model('SocialScrape', socialScrapeSchema);
+
+
+// Add error handling for duplicate key errors
+socialScrapeSchema.post('save', function(error, doc, next) {
+  if (error.name === 'MongoError' && error.code === 11000) {
+    next(new Error('Duplicate key error'));
+  } else {
+    next(error);
+  }
+});
+
+const SocialScrape = mongoose.model('social_scrapes', socialScrapeSchema);
+
+module.exports = SocialScrape;
