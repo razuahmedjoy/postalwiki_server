@@ -58,7 +58,6 @@ const moveCompletedFile = async (filePath) => {
 const ensureIndexes = async () => {
     try {
         await SocialScrape.collection.createIndex({ url: 1, date: 1 }, { unique: true });
-        await SocialScrape.collection.createIndex({ date: 1 });
         logger.info('Indexes created successfully');
     } catch (error) {
         logger.error('Error creating indexes:', error);

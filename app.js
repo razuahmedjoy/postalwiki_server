@@ -40,9 +40,9 @@ app.use((req, res, next) => {
     next();
 });
 
-app.use('/api', authRoutes);
 // Public routes (no auth required)
-// app.use('/api/public', publicRoutes);
+app.use('/api/public', publicRoutes);
+app.use('/api', authRoutes);
 
 // Protected routes
 app.get('/api/stats', getCollectionStats);
