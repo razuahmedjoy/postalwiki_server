@@ -17,7 +17,7 @@ const socialScrapeSchema = new mongoose.Schema({
   keywords: String,
   statusCode: String,
   redirect_url: String,
-}, { timestamps: true, collection: 'social_scrapes', strict: false });
+}, { timestamps: true, collection: 'socialscrapes', strict: false });
 
 // Compound index for unique url + date combination
 socialScrapeSchema.index({ url: 1, date: 1 }, { unique: true, background: true });
@@ -33,6 +33,6 @@ socialScrapeSchema.post('save', function(error, doc, next) {
   }
 });
 
-const SocialScrape = mongoose.model('social_scrapes', socialScrapeSchema);
+const SocialScrape = mongoose.model('SocialScrape', socialScrapeSchema);
 
 module.exports = SocialScrape;
