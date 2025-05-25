@@ -8,7 +8,7 @@ const SocialScrape = require('../models/SocialScrape');
 const logger = require('../config/logger');
 
 // Reduced batch size and parallel processing for 4GB RAM, 2-core VPS
-const BATCH_SIZE = 5000; // Reduced from 100k to 5k for lower memory usage
+const BATCH_SIZE = 50000; // Reduced from 100k to 5k for lower memory usage
 const PARALLEL_BATCHES = 2; // Reduced to match CPU cores
 const IMPORT_DIR = path.join(__dirname, '../imports/social_scrape');
 const eventEmitter = new EventEmitter();
@@ -58,6 +58,7 @@ const moveCompletedFile = async (filePath) => {
 const ensureIndexes = async () => {
     try {
         await SocialScrape.collection.createIndex({ url: 1, date: 1 }, { unique: true });
+        await SocialScrape.collection.createIndex({ date: 1 });
         logger.info('Indexes created successfully');
     } catch (error) {
         logger.error('Error creating indexes:', error);
@@ -99,8 +100,9 @@ const insertBatch = async (batch, filename, processed, total) => {
         // Optimized MongoDB settings for lower memory usage
         const result = await SocialScrape.bulkWrite(operations, { 
             ordered: true, // Changed to true for better memory management
-            writeConcern: { w: 1 }, // Changed to 1 for better reliability
-            bypassDocumentValidation: true
+            writeConcern: { w: 0 }, // Changed to 1 for better reliability
+            bypassDocumentValidation: true,
+            forceServerObjectId: true
         });
 
         progressTracker.upserted += result.upsertedCount;
@@ -246,7 +248,7 @@ const processFile = async (filePath) => {
         const parser = csv.parse({
             columns: true,
             skip_empty_lines: true,
-            highWaterMark: 256 * 1024 // Reduced to 256KB chunks for lower memory usage
+            highWaterMark: 1024 * 1024 // 1MB chunks
         });
 
         parser.on('readable', async () => {
@@ -308,7 +310,7 @@ const processFile = async (filePath) => {
         });
 
         // Use streams with smaller chunks for better memory management
-        fs.createReadStream(filePath, { highWaterMark: 256 * 1024 }) // 256KB chunks
+        fs.createReadStream(filePath, { highWaterMark: 1024 * 1024 }) // 1MB chunks
             .pipe(parser);
     });
 };
