@@ -185,9 +185,6 @@ const processRecord = (record) => {
         };
 
         switch (record.CODE) {
-            case '[RD]':
-                processedRecord.redirectUrl = cleanSocialUrl(record.RESULT);
-                break;
             case '[TI]':
                 processedRecord.title = cleanText(record.RESULT);
                 break;
