@@ -8,7 +8,7 @@ const SocialScrape = require('../models/SocialScrape');
 const logger = require('../config/logger');
 
 // Reduced batch size and parallel processing for 4GB RAM, 2-core VPS
-const BATCH_SIZE = 50000; // Reduced from 100k to 5k for lower memory usage
+const BATCH_SIZE = 1000; // Reduced from 50000 to 1000 for better reliability
 const PARALLEL_BATCHES = 2; // Reduced to match CPU cores
 const IMPORT_DIR = path.join(__dirname, '../imports/social_scrape');
 const eventEmitter = new EventEmitter();
@@ -58,7 +58,6 @@ const moveCompletedFile = async (filePath) => {
 const ensureIndexes = async () => {
     try {
         await SocialScrape.collection.createIndex({ url: 1, date: 1 }, { unique: true });
-        await SocialScrape.collection.createIndex({ date: 1 });
         logger.info('Indexes created successfully');
     } catch (error) {
         logger.error('Error creating indexes:', error);
@@ -97,13 +96,16 @@ const insertBatch = async (batch, filename, processed, total) => {
             }
         }));
 
-        // Optimized MongoDB settings for lower memory usage
+        logger.info(`Attempting to insert batch of ${batch.length} records`);
+
+        // Modified MongoDB settings for better reliability
         const result = await SocialScrape.bulkWrite(operations, { 
-            ordered: true, // Changed to true for better memory management
-            writeConcern: { w: 0 }, // Changed to 1 for better reliability
-            bypassDocumentValidation: true,
-            forceServerObjectId: true
+            ordered: true,
+            writeConcern: { w: 1 }, // Changed to 1 to ensure write acknowledgment
+            bypassDocumentValidation: true
         });
+
+        logger.info(`Batch insert result - Upserted: ${result.upsertedCount}, Modified: ${result.modifiedCount}`);
 
         progressTracker.upserted += result.upsertedCount;
         progressTracker.modified += result.modifiedCount;
@@ -115,6 +117,8 @@ const insertBatch = async (batch, filename, processed, total) => {
             modified: result.modifiedCount
         };
     } catch (error) {
+        logger.error(`Error in insertBatch: ${error.message}`);
+        logger.error(`Error details: ${JSON.stringify(error)}`);
         progressTracker.errors.push({
             filename,
             error: error.message
@@ -124,106 +128,115 @@ const insertBatch = async (batch, filename, processed, total) => {
 };
 
 const processRecord = (record) => {
-    const trimUrl = (url) => {
-        if (!url) return '';
-        return url
-            .replace(/^(https?:\/\/)/i, '')
-            .replace(/^www\./i, '')
-            .replace(/^([^/]+).*?$/, '$1');
-    };
+    try {
+        const trimUrl = (url) => {
+            if (!url) return '';
+            return url
+                .replace(/^(https?:\/\/)/i, '')
+                .replace(/^www\./i, '')
+                .replace(/^([^/]+).*?$/, '$1');
+        };
 
-    // Validate if the string is a valid domain name
-    const isValidDomain = (domain) => {
-        return /^[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)+$/.test(domain);
-    };
+        // Validate if the string is a valid domain name
+        const isValidDomain = (domain) => {
+            return /^[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)+$/.test(domain);
+        };
 
-    const cleanSocialUrl = (url) => {
-        if (!url) return '';
-        // Remove everything after ? in URLs
-        return url.replace(/^(https?:\/\/)/i, '')
-        .replace(/^www\./i, '').split('?')[0];
-    };
+        const cleanSocialUrl = (url) => {
+            if (!url) return '';
+            // Remove everything after ? in URLs
+            return url.replace(/^(https?:\/\/)/i, '')
+            .replace(/^www\./i, '').split('?')[0];
+        };
 
-    const cleanText = (text) => {
-        if (!text) return '';
-        // Remove control characters and extra spaces
-        return text.replace(/[\x00-\x1F\x7F-\x9F]/g, '')
-            .replace(/\s+/g, ' ')
-            .trim();
-    };
+        const cleanText = (text) => {
+            if (!text) return '';
+            // Remove control characters and extra spaces
+            return text.replace(/[\x00-\x1F\x7F-\x9F]/g, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+        };
 
-    // Get the URL from the first column
-    const url = Object.values(record)[0];
-    
-    // Skip if URL is not a valid domain
-    if (!isValidDomain(url)) {
-        return null;
-    }
-
-    // Skip records with error or no data
-    if (record.RESULT === 'Fetch error or no data found' || record.RESULT === 'not required') {
-        // If we only have URL and no other data, skip this record
-        const hasOtherData = Object.entries(record).some(([key, value]) => 
-            key !== 'RESULT' && value && value.trim() !== ''
-        );
-        if (!hasOtherData) {
+        // Get the URL from the first column
+        const url = Object.values(record)[0];
+        
+        // Skip if URL is not a valid domain
+        if (!isValidDomain(url)) {
+            logger.debug(`Skipping invalid domain: ${url}`);
             return null;
         }
+
+        // Skip records with error or no data
+        if (record.RESULT === 'Fetch error or no data found' || record.RESULT === 'not required') {
+            // If we only have URL and no other data, skip this record
+            const hasOtherData = Object.entries(record).some(([key, value]) => 
+                key !== 'RESULT' && value && value.trim() !== ''
+            );
+            if (!hasOtherData) {
+                logger.debug(`Skipping record with no data for URL: ${url}`);
+                return null;
+            }
+        }
+
+        // Process the record based on CODE
+        const processedRecord = {
+            url: trimUrl(url),
+            date: new Date(record.DATE?.split('/').reverse().join('-')), // Convert DD/MM/YYYY to YYYY-MM-DD, handle undefined
+        };
+
+        switch (record.CODE) {
+            case '[RD]':
+                processedRecord.redirectUrl = cleanSocialUrl(record.RESULT);
+                break;
+            case '[TI]':
+                processedRecord.title = cleanText(record.RESULT);
+                break;
+            case '[KW]':
+                processedRecord.keywords = cleanText(record.RESULT);
+                break;
+            case '[SC]':
+            case '[ER]':
+                processedRecord.statusCode = record.RESULT;
+                break;
+            case '[PC]':
+                processedRecord.postcode = cleanText(record.RESULT);
+                break;
+            case '[EM]':
+                processedRecord.email = cleanText(record.RESULT);
+                break;
+            case '[TW]':
+                processedRecord.twitter = cleanSocialUrl(record.RESULT);
+                break;
+            case '[FB]':
+                processedRecord.facebook = cleanSocialUrl(record.RESULT);
+                break;
+            case '[LK]':
+                processedRecord.linkedin = cleanSocialUrl(record.RESULT);
+                break;
+            case '[PT]':
+                processedRecord.pinterest = cleanSocialUrl(record.RESULT);
+                break;
+            case '[YT]':
+                processedRecord.youtube = cleanSocialUrl(record.RESULT);
+                break;
+            case '[IS]':
+                processedRecord.instagram = cleanSocialUrl(record.RESULT);
+                break;
+            case '[RD]':
+                processedRecord.redirect_url = cleanSocialUrl(record.RESULT);
+                break;
+            case '[MD]':
+                processedRecord.meta_description = cleanText(record.RESULT);
+                break;
+        }
+
+        logger.debug(`Processed record for URL: ${processedRecord.url}`);
+        return processedRecord;
+    } catch (error) {
+        logger.error(`Error processing record: ${error.message}`);
+        logger.error(`Record data: ${JSON.stringify(record)}`);
+        return null;
     }
-
-    // Process the record based on CODE
-    const processedRecord = {
-        url: trimUrl(url),
-        date: new Date(record.DATE?.split('/').reverse().join('-')), // Convert DD/MM/YYYY to YYYY-MM-DD, handle undefined
-    };
-
-    switch (record.CODE) {
-        case '[RD]':
-            processedRecord.redirectUrl = cleanSocialUrl(record.RESULT);
-            break;
-        case '[TI]':
-            processedRecord.title = cleanText(record.RESULT);
-            break;
-        case '[KW]':
-            processedRecord.keywords = cleanText(record.RESULT);
-            break;
-        case '[SC]':
-        case '[ER]':
-            processedRecord.statusCode = record.RESULT;
-            break;
-        case '[PC]':
-            processedRecord.postcode = cleanText(record.RESULT);
-            break;
-        case '[EM]':
-            processedRecord.email = cleanText(record.RESULT);
-            break;
-        case '[TW]':
-            processedRecord.twitter = cleanSocialUrl(record.RESULT);
-            break;
-        case '[FB]':
-            processedRecord.facebook = cleanSocialUrl(record.RESULT);
-            break;
-        case '[LK]':
-            processedRecord.linkedin = cleanSocialUrl(record.RESULT);
-            break;
-        case '[PT]':
-            processedRecord.pinterest = cleanSocialUrl(record.RESULT);
-            break;
-        case '[YT]':
-            processedRecord.youtube = cleanSocialUrl(record.RESULT);
-            break;
-        case '[IS]':
-            processedRecord.instagram = cleanSocialUrl(record.RESULT);
-            break;
-        case '[RD]':
-            processedRecord.redirect_url = cleanSocialUrl(record.RESULT);
-            break;
-        case '[MD]':
-            processedRecord.meta_description = cleanText(record.RESULT);
-            break;
-    }
-
-    return processedRecord;
 };
 
 const processFile = async (filePath) => {
