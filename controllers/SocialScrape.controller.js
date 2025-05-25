@@ -57,7 +57,7 @@ const getImportProgress = (req, res) => {
 const getPaginatedSocialScrapes = async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 10;
+        const limit = parseInt(req.query.limit) || 100;
         const searchUrl = req.query.searchUrl || '';
         const skip = (page - 1) * limit;
 
@@ -67,14 +67,20 @@ const getPaginatedSocialScrapes = async (req, res) => {
             query.url = { $regex: searchUrl, $options: 'i' };
         }
 
-        // Get total count for pagination
-        const total = await SocialScrape.countDocuments(query);
-
-        // Get paginated data
+        // Use lean() for better performance as we don't need Mongoose documents
+        // Only select required fields to reduce data transfer
         const socialScrapes = await SocialScrape.find(query)
+            .select('url date title twitter facebook instagram linkedin youtube pinterest email phone postcode keywords statusCode redirect_url meta_description')
             .sort({ date: -1 })
             .skip(skip)
-            .limit(limit);
+            .limit(limit)
+            .lean();
+
+        // Use estimatedDocumentCount for better performance on large collections
+        // Only if no search filter is applied
+        const total = searchUrl 
+            ? await SocialScrape.countDocuments(query)
+            : await SocialScrape.estimatedDocumentCount();
 
         res.json({
             success: true,
