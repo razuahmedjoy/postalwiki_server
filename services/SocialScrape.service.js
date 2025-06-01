@@ -2,19 +2,24 @@
 const csv = require('csv-parse');
 const fs = require('fs');
 const path = require('path');
-const { Transform } = require('stream');
 const { EventEmitter } = require('events');
 const SocialScrape = require('../models/SocialScrape');
 const logger = require('../config/logger');
+const { isValidDomain } = require('../utils/helpers');
+const { archiveFile } = require('../utils/fileUtils');
 
 // Reduced batch size and parallel processing for 4GB RAM, 2-core VPS
 const BATCH_SIZE = 1000; // Reduced from 50000 to 1000 for better reliability
 const PARALLEL_BATCHES = 2; // Reduced to match CPU cores
 const IMPORT_DIR = path.join(__dirname, '../imports/social_scrape');
-const eventEmitter = new EventEmitter();
+const BLACKLIST_DIR = path.join(__dirname, '../imports/social_scrape_blacklisted');
 
-// Progress tracking
-const progressTracker = {
+// Create separate event emitters for each process
+const importEventEmitter = new EventEmitter();
+const blacklistEventEmitter = new EventEmitter();
+
+// Separate progress trackers for each process
+const importProgressTracker = {
     currentFile: null,
     processed: 0,
     total: 0,
@@ -23,6 +28,9 @@ const progressTracker = {
     errors: [],
     isComplete: false
 };
+
+// Store for blacklist progress trackers
+const blacklistProgressStore = new Map();
 
 // Utility Functions
 const ensureImportDirectory = async () => {
@@ -107,9 +115,9 @@ const insertBatch = async (batch, filename, processed, total) => {
 
         logger.info(`Batch insert result - Upserted: ${result.upsertedCount}, Modified: ${result.modifiedCount}`);
 
-        progressTracker.upserted += result.upsertedCount;
-        progressTracker.modified += result.modifiedCount;
-        progressTracker.processed = processed;
+        importProgressTracker.upserted += result.upsertedCount;
+        importProgressTracker.modified += result.modifiedCount;
+        importProgressTracker.processed = processed;
 
         return {
             success: true,
@@ -119,7 +127,7 @@ const insertBatch = async (batch, filename, processed, total) => {
     } catch (error) {
         logger.error(`Error in insertBatch: ${error.message}`);
         logger.error(`Error details: ${JSON.stringify(error)}`);
-        progressTracker.errors.push({
+        importProgressTracker.errors.push({
             filename,
             error: error.message
         });
@@ -137,10 +145,7 @@ const processRecord = (record) => {
                 .replace(/^([^/]+).*?$/, '$1');
         };
 
-        // Validate if the string is a valid domain name
-        const isValidDomain = (domain) => {
-            return /^[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)+$/.test(domain);
-        };
+  
 
         const cleanSocialUrl = (url) => {
             if (!url) return '';
@@ -236,20 +241,20 @@ const processRecord = (record) => {
     }
 };
 
-const processFile = async (filePath) => {
+const processFile = async (filePath, isBlackList = false) => {
     const filename = path.basename(filePath);
     let processed = 0;
     let batches = [];
     let currentBatch = [];
 
     // Reset progress for new file
-    progressTracker.currentFile = filename;
-    progressTracker.processed = 0;
-    progressTracker.total = 0;
-    progressTracker.upserted = 0;
-    progressTracker.modified = 0;
-    progressTracker.errors = [];
-    progressTracker.isComplete = false;
+    importProgressTracker.currentFile = filename;
+    importProgressTracker.processed = 0;
+    importProgressTracker.total = 0;
+    importProgressTracker.upserted = 0;
+    importProgressTracker.modified = 0;
+    importProgressTracker.errors = [];
+    importProgressTracker.isComplete = false;
 
     // Ensure indexes exist
     await ensureIndexes();
@@ -269,7 +274,7 @@ const processFile = async (filePath) => {
                     if (processedRecord) {
                         currentBatch.push(processedRecord);
                         processed++;
-                        progressTracker.processed = processed;
+                        importProgressTracker.processed = processed;
 
                         if (currentBatch.length >= BATCH_SIZE) {
                             batches.push([...currentBatch]);
@@ -286,7 +291,7 @@ const processFile = async (filePath) => {
                         }
                     }
                 } catch (error) {
-                    progressTracker.errors.push({
+                    importProgressTracker.errors.push({
                         filename,
                         error: error.message
                     });
@@ -304,7 +309,7 @@ const processFile = async (filePath) => {
                     await processBatchesInParallel(batches, filename, processed);
                 }
                 await moveCompletedFile(filePath);
-                progressTracker.isComplete = true;
+                importProgressTracker.isComplete = true;
                 resolve({ filename, processed });
             } catch (error) {
                 reject(error);
@@ -312,7 +317,7 @@ const processFile = async (filePath) => {
         });
 
         parser.on('error', (error) => {
-            progressTracker.errors.push({
+            importProgressTracker.errors.push({
                 filename,
                 error: error.message
             });
@@ -325,15 +330,172 @@ const processFile = async (filePath) => {
     });
 };
 
-const getImportFiles = async () => {
+const getImportFiles = async (isBlackList = false) => {
     try {
         await ensureImportDirectory();
-        logger.info('Reading import directory:', IMPORT_DIR);
-        const files = await fs.promises.readdir(IMPORT_DIR);
-        return files.filter(file => file.endsWith('.csv'));
+        if(isBlackList){
+            logger.info('Reading blacklist directory:', BLACKLIST_DIR);
+        }
+        else{
+            logger.info('Reading import directory:', IMPORT_DIR);
+        }
+        
+        if(isBlackList){
+            const files = await fs.promises.readdir(BLACKLIST_DIR);
+            return files.filter(file => file.endsWith('.csv'));
+        
+        }
+        else{
+            const files = await fs.promises.readdir(IMPORT_DIR);
+            return files.filter(file => file.endsWith('.csv'));
+        }
+
     } catch (error) {
         logger.error('Error reading import directory:', error);
         return [];
+    }
+};
+
+const getBlacklistFiles = async () => {
+    try {
+        await ensureImportDirectory();
+        const files = await fs.promises.readdir(BLACKLIST_DIR);
+        return files.filter(file => file.endsWith('.csv'));
+    } catch (error) {
+        logger.error('Error reading blacklist directory:', error);
+        throw new Error('Failed to read blacklist directory');
+    }
+};
+
+
+const processBlacklistFile = async (filePath, urlColumn, processId) => {
+    try {
+        // Get or create progress tracker for this process
+        let progressTracker = blacklistProgressStore.get(processId);
+        if (!progressTracker) {
+            progressTracker = {
+                currentFile: null,
+                processed: 0,
+                total: 0,
+                upserted: 0,
+                modified: 0,
+                errors: [],
+                isComplete: false
+            };
+            blacklistProgressStore.set(processId, progressTracker);
+        }
+
+        // Reset progress for new file
+        progressTracker.currentFile = path.basename(filePath);
+        progressTracker.processed = 0;
+        progressTracker.total = 0;
+        progressTracker.upserted = 0;
+        progressTracker.modified = 0;
+        progressTracker.errors = [];
+        progressTracker.isComplete = false;
+
+        // Create logs directory if it doesn't exist
+        const logsDir = path.join(process.cwd(), 'logs', 'social_scrape');
+        await fs.promises.mkdir(logsDir, { recursive: true });
+        const logFile = path.join(logsDir, 'blacklisted_logs.log');
+
+        const fileContent = await fs.promises.readFile(filePath, 'utf-8');
+        const records = fileContent.split('\n').filter(line => line.trim());
+        progressTracker.total = records.length;
+
+        // Log start of processing
+        await fs.promises.appendFile(logFile, `\n[${new Date().toISOString()}] Starting processing of file: ${path.basename(filePath)}\n`);
+
+        for (const record of records) {
+            try {
+                const columns = record.split(',');
+                if (columns.length < urlColumn) {
+                    const errorMsg = `Invalid record format: ${record}`;
+                    progressTracker.errors.push(errorMsg);
+                    await fs.promises.appendFile(logFile, `[${new Date().toISOString()}] ${errorMsg}\n`);
+                    continue;
+                }
+
+                let url = columns[urlColumn - 1].trim();
+                if (!url) {
+                    const errorMsg = `Empty URL in record: ${record}`;
+                    progressTracker.errors.push(errorMsg);
+                    await fs.promises.appendFile(logFile, `[${new Date().toISOString()}] ${errorMsg}\n`);
+                    continue;
+                }
+
+                // Clean the URL
+                url = url
+                    .replace(/^(https?:\/\/)/i, '')
+                    .replace(/^www\./i, '')
+                    .replace(/^([^/]+).*?$/, '$1')
+                    .toLowerCase();
+
+                if (!isValidDomain(url)) {
+                    const errorMsg = `Invalid domain format: ${url}`;
+                    progressTracker.errors.push(errorMsg);
+                    await fs.promises.appendFile(logFile, `[${new Date().toISOString()}] ${errorMsg}\n`);
+                    continue;
+                }
+
+                // Create a new document with default values
+                const defaultDoc = {
+                    url,
+                    date: new Date()
+                };
+
+                const result = await SocialScrape.findOneAndUpdate(
+                    { url },
+                    { 
+                        $set: { 
+                            is_blacklisted: true
+                        },
+                        $setOnInsert: defaultDoc
+                    },
+                    { 
+                        upsert: true,
+                        new: true,
+                        setDefaultsOnInsert: true
+                    }
+                );
+
+                if (result.isNew) {
+                    progressTracker.upserted++;
+                    await fs.promises.appendFile(logFile, `[${new Date().toISOString()}] Inserted new record for URL: ${url}\n`);
+                } else if (result.isModified('is_blacklisted')) {
+                    progressTracker.modified++;
+                    await fs.promises.appendFile(logFile, `[${new Date().toISOString()}] Updated blacklist status for URL: ${url}\n`);
+                }
+
+                progressTracker.processed++;
+                blacklistEventEmitter.emit('progress', { processId, ...progressTracker });
+
+            } catch (error) {
+                const errorMsg = `Error processing record: ${error.message}`;
+                progressTracker.errors.push(errorMsg);
+                await fs.promises.appendFile(logFile, `[${new Date().toISOString()}] ${errorMsg}\n`);
+            }
+        }
+
+        // Archive the file after processing
+        const archiveDir = path.join(process.cwd(), 'imports', 'social_scrape_blacklisted', 'completed_'+new Date().toISOString().split('T')[0]);
+        await archiveFile(filePath, {
+            archiveDir,
+            useTimestamp: true,
+            timestampFormat: 'ISO',
+            prefix: 'blacklist'
+        });
+
+        // Log completion
+        await fs.promises.appendFile(logFile, `[${new Date().toISOString()}] Processing completed. Processed: ${progressTracker.processed}, Upserted: ${progressTracker.upserted}, Modified: ${progressTracker.modified}, Errors: ${progressTracker.errors.length}\n`);
+
+        progressTracker.isComplete = true;
+        blacklistEventEmitter.emit('progress', { processId, ...progressTracker });
+
+    } catch (error) {
+        const errorMsg = `Error processing blacklist file: ${error.message}`;
+        logger.error(errorMsg);
+        throw error;
     }
 };
 
@@ -341,15 +503,25 @@ const getCollectionStats = async () => {
     return await SocialScrape.countDocuments();
 };
 
+const getBlacklistProgress = (processId) => {
+    const progress = blacklistProgressStore.get(processId);
+    return progress ? { ...progress } : null;
+};
+
 const SocialScrapeService = {
     getImportFiles,
+    getBlacklistFiles,
     getCollectionStats,
     processFile,
-    getProgress: () => ({ ...progressTracker })
+    processBlacklistFile,
+    getImportProgress: () => ({ ...importProgressTracker }),
+    getBlacklistProgress
 };
 
 module.exports = {
     SocialScrapeService,
     IMPORT_DIR,
-    eventEmitter
+    BLACKLIST_DIR,
+    importEventEmitter,
+    blacklistEventEmitter
 };

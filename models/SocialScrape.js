@@ -18,10 +18,14 @@ const socialScrapeSchema = new mongoose.Schema({
   statusCode: String,
   redirect_url: String,
   meta_description: String,
+  is_blacklisted: { type: Boolean, default: false },
+  
 }, { timestamps: true, collection: 'socialscrapes', strict: false });
 
 // Compound index for unique url + date combination
 socialScrapeSchema.index({ url: 1, date: 1 }, { unique: true, background: true });
+// Add a dedicated index for URL search
+socialScrapeSchema.index({ url: 1 }, { background: true });
 
 
 

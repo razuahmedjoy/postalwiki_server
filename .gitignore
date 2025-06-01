@@ -3,6 +3,7 @@ node_modules
 
 # add logs files not the folder
 *.log
+logs/*-audit.json
 
 # add all .env files
 .env
