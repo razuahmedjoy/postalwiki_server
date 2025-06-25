@@ -159,7 +159,8 @@ const processRecord = (record) => {
             // Remove control characters and extra spaces
             return text.replace(/[\x00-\x1F\x7F-\x9F]/g, '')
                 .replace(/\s+/g, ' ')
-                .trim();
+                .trim()
+                .substring(0, 400);
         };
 
         // Get the URL from the first column
