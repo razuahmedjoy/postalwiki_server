@@ -1,8 +1,8 @@
 // controllers/SocialScrapeController.js
-const { SocialScrapeService, IMPORT_DIR, BLACKLIST_DIR } = require('../services/SocialScrape.service');
+const { SocialScrapeService, IMPORT_DIR, BLACKLIST_DIR, PHONE_DIR } = require('../services/SocialScrape.service');
 const path = require('path');
 const SocialScrape = require('../models/SocialScrape');
-const { importEventEmitter, blacklistEventEmitter } = require('../services/SocialScrape.service');
+const { importEventEmitter, blacklistEventEmitter, phoneEventEmitter } = require('../services/SocialScrape.service');
 const logger = require('../config/logger');
 const { v4: uuidv4 } = require('uuid');
 
@@ -188,14 +188,114 @@ const getProgress = async (req, res) => {
     }
 };
 
+const updatePhoneNumber = async (req, res) => {
+    try {
+        const files = await SocialScrapeService.getPhoneFiles();
+        
+        if (files.length === 0) {
+            return res.status(404).json({ message: 'No CSV files found in phone directory' });
+        }
+
+        // Generate a unique process ID
+        const processId = uuidv4();
+
+        // Start processing files asynchronously
+        processPhoneFiles(files, processId).catch(error => {
+            logger.error('Error processing phone files:', error);
+            const progress = SocialScrapeService.getPhoneProgress(processId);
+            if (progress) {
+                progress.errors.push(error.message);
+                progress.isComplete = true;
+                phoneEventEmitter.emit('progress', { processId, ...progress });
+            }
+        });
+
+        res.json({
+            success: true,
+            message: 'Phone number update started',
+            processId,
+            files: files
+        });
+    } catch (error) {
+        logger.error('Error starting phone number update:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+const processPhoneFiles = async (files, processId) => {
+    try {
+        logger.info(`Starting phone processing for ${files.length} files with process ID: ${processId}`);
+        
+        for (const file of files) {
+            try {
+                logger.info(`Processing phone file: ${file}`);
+                const filePath = path.join(PHONE_DIR, file);
+                await SocialScrapeService.processPhoneFile(filePath, processId);
+                logger.info(`Completed processing phone file: ${file}`);
+            } catch (error) {
+                logger.error(`Error processing phone file ${file}:`, error);
+                
+                // Update progress with error
+                const progress = SocialScrapeService.getPhoneProgress(processId);
+                if (progress) {
+                    progress.errors.push(`Failed to process file ${file}: ${error.message}`);
+                    progress.isComplete = true;
+                    phoneEventEmitter.emit('progress', { processId, ...progress });
+                }
+                
+                // Continue with next file instead of stopping completely
+                continue;
+            }
+        }
+        
+        logger.info(`Completed phone processing for all files with process ID: ${processId}`);
+    } catch (error) {
+        logger.error('Error in processPhoneFiles:', error);
+        throw error;
+    }
+};
+
+const getPhoneProgress = async (req, res) => {
+    try {
+        const { processId } = req.query;
+        if (!processId) {
+            return res.status(400).json({ error: 'Process ID is required' });
+        }
+
+        logger.info(`Getting phone progress for process ID: ${processId}`);
+        
+        const progress = SocialScrapeService.getPhoneProgress(processId);
+        if (!progress) {
+            logger.warn(`No progress found for process ID: ${processId}`);
+            return res.status(404).json({ error: 'Process not found' });
+        }
+
+        logger.info(`Phone progress for ${processId}:`, {
+            currentFile: progress.currentFile,
+            processed: progress.processed,
+            updated: progress.updated,
+            created: progress.created,
+            errors: progress.errors.length,
+            isComplete: progress.isComplete
+        });
+
+        res.json(progress);
+    } catch (error) {
+        logger.error('Error getting phone progress:', error);
+        res.status(500).json({ error: 'Failed to get phone progress' });
+    }
+};
+
 const SocialScrapeController = {
     startImport,
     getStats,
     getImportProgress,
     getBlacklistProgress,
+    getPhoneProgress,
     getPaginatedSocialScrapes,
     updateBlacklist,
-    getProgress
+    getProgress,
+    updatePhoneNumber
 };
 
 module.exports = {

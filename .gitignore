@@ -7,7 +7,9 @@ logs/*-audit.json
 
 # add all .env files
 .env
-
+# add all csv files in the imports folder
+imports/*.csv
+imports/logs/*.log
 # the logs directory should not be ignored, but the files inside it should be
 
 

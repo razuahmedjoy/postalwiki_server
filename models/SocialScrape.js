@@ -8,7 +8,7 @@ const socialScrapeSchema = new mongoose.Schema({
   twitter: String,
   postcode: String,
   email: String,
-  phone: String,
+  phone: [String],
   facebook: String,
   youtube: String,
   instagram: String,
