@@ -29,29 +29,38 @@ demo.org,[PN],02012345678,10-06-2025
 - Phone numbers must be exactly **10 or 11 digits** after cleaning
 - Numbers with fewer or more digits are rejected
 
+### Country Code Validation
+The system validates phone numbers against a comprehensive list of country codes and their expected lengths. Each country has specific phone number length requirements.
+
 ### Cleaning Process
 1. **Remove spaces** - All spaces are removed
 2. **Remove dashes** - All dashes (-) are removed
 3. **Remove dots** - All decimal points (.) are removed
 4. **Remove brackets** - All brackets ( ) [ ] are removed
-5. **Country code conversion** - All country codes are converted to UK format (+44)
-6. **US format conversion** - Numbers starting with "1-" become "0..."
-7. **Leading zero addition** - 10-digit numbers starting with 1 get a leading 0
-8. **UK format conversion** - +44 becomes 0, 44 becomes 0
+5. **Country code validation** - Check against valid country codes
+6. **Length validation** - Verify number length matches country requirements
+7. **Formatting** - Apply proper formatting with country code brackets
 
-### Examples of Cleaning:
-- `1-866-387-9595` → `08663879595` → `+448663879595`
-- `1491415070` → `01491415070` → `+4491491415070`
-- `+441132798302` → `01132798302` → `+441132798302`
-- `0345 7263646` → `03457263646` → `+443457263646`
-- `+44(800)802192` → `0800802192` → `+44800802192`
-- `(32)34241387` → `3234241387` → `+443234241387`
+### Phone Number Formatting
+Phone numbers are formatted as: `[+COUNTRY_CODE] PHONE_NUMBER`
+
+#### Examples of Formatting:
+- `+44535931969` → `[+44] 0535931969` (UK, added leading 0)
+- `+42059547892` → `[+420] 059547892` (Czech Republic, added leading 0)
+- `+35123456789` → `[+351] 0123456789` (Portugal, added leading 0)
+- `+240-222-039796` → `[+240] 222039796` (Equatorial Guinea)
+- `07508770171` → `[+44] 7508770171` (UK number without country code)
+
+### Special Handling for UK Domains
+- URLs ending in `.co.uk` or `.uk` are given special consideration for UK phone numbers
+- UK numbers are formatted as `[+44] PHONE_NUMBER`
 
 ### Invalid Numbers (Will be Rejected):
 - Numbers with decimal points: `0.161748457891`
 - Numbers that are too long: `221748455043592`
 - Numbers that are too short: `123456789`
-- Numbers that don't match UK patterns after cleaning
+- Numbers that don't match any country's requirements
+- Numbers with invalid country codes
 
 ## URL Processing Rules
 
@@ -86,6 +95,27 @@ Processing logs are saved to `logs/social_scrape/phone_logs.log` with detailed i
 - Errors encountered
 - URLs skipped due to row count
 - Invalid phone numbers rejected
+
+## Testing
+
+A test file `test_phone_formatting.csv` is included with various phone number formats to verify the validation and formatting rules:
+
+```
+example.co.uk,[PN],+44535931969,10-06-2025
+test.co.uk,[PN],+42059547892,10-06-2025
+demo.org,[PN],+35123456789,10-06-2025
+uk-site.co.uk,[PN],+240-222-039796,10-06-2025
+local-site.co.uk,[PN],07508770171,10-06-2025
+invalid-site.com,[PN],0.161748457891,10-06-2025
+```
+
+Expected results:
+- `+44535931969` → `[+44] 0535931969` (UK, added leading 0)
+- `+42059547892` → `[+420] 059547892` (Czech Republic, added leading 0)
+- `+35123456789` → `[+351] 0123456789` (Portugal, added leading 0)
+- `+240-222-039796` → `[+240] 222039796` (Equatorial Guinea)
+- `07508770171` → `[+44] 7508770171` (UK number)
+- `0.161748457891` → Rejected (contains decimal point)
 
 ## File Management
 

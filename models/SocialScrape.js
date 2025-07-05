@@ -1,33 +1,32 @@
 // models/SocialScrape.js
 const mongoose = require('mongoose');
 
-const socialScrapeSchema = new mongoose.Schema({
-  url: { type: String, required: true },
-  date: { type: Date, required: true },
-  title: String,
-  twitter: String,
-  postcode: String,
-  email: String,
-  phone: [String],
-  facebook: String,
-  youtube: String,
-  instagram: String,
-  linkedin: String,
-  pinterest: String,
-  keywords: String,
-  statusCode: String,
-  redirect_url: String,
-  meta_description: String,
-  is_blacklisted: { type: Boolean, default: false },
+  const socialScrapeSchema = new mongoose.Schema({
+    url: { type: String, required: true, unique: true },
+    date: { type: Date, required: true },
+    title: String,
+    twitter: String,
+    postcode: String,
+    email: String,
+    phone: [String],
+    facebook: String,
+    youtube: String,
+    instagram: String,
+    linkedin: String,
+    pinterest: String,
+    statusCode: String,
+    redirect_url: String,
+    meta_description: String,
+    is_blacklisted: { type: Boolean, default: false },
   
 }, { timestamps: true, collection: 'socialscrapes', strict: false });
 
-// Compound index for unique url + date combination
-socialScrapeSchema.index({ url: 1, date: 1 }, { unique: true, background: true });
-// Add a dedicated index for URL search
-socialScrapeSchema.index({ url: 1 }, { background: true });
+// Remove compound index to avoid conflicts - only URL should be unique
+// socialScrapeSchema.index({ url: 1, date: 1 }, { background: true });
+socialScrapeSchema.index({date: -1}, {background: true})
 
-
+// Add text index for fast URL search
+socialScrapeSchema.index({ url: 'text' }, { background: true });
 
 // Add error handling for duplicate key errors
 socialScrapeSchema.post('save', function(error, doc, next) {
