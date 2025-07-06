@@ -70,14 +70,14 @@ const moveCompletedFile = async (filePath) => {
         const filename = path.basename(filePath);
         const today = new Date().toISOString().split('T')[0];
         const completedDir = path.join(IMPORT_DIR, `completed_${today}`);
-        
+
         // Create completed directory if it doesn't exist
         await fs.promises.mkdir(completedDir, { recursive: true });
-        
+
         // Move the file with retry logic for EBUSY errors
         const newPath = path.join(completedDir, filename);
         await fs.promises.rename(filePath, newPath);
-        
+
         logger.info(`Moved file ${filename} to completed directory`);
     } catch (error) {
         logger.error(`Failed to move file: ${error.message}`);
@@ -100,16 +100,16 @@ const processBatchesInParallel = async (batches, filename, processed) => {
     try {
         // Process batches sequentially to avoid memory pressure
         let results = { upserted: 0, modified: 0 };
-        
+
         for (const batch of batches) {
             const result = await insertBatch(batch, filename, processed, null);
             results.upserted += result.upserted;
             results.modified += result.modified;
-            
+
             // Add a small delay between batches to allow memory cleanup
             await new Promise(resolve => setTimeout(resolve, 100));
         }
-        
+
         return results;
     } catch (error) {
         logger.error('Error processing batches:', error);
@@ -119,53 +119,21 @@ const processBatchesInParallel = async (batches, filename, processed) => {
 
 const insertBatch = async (batch, filename, processed, total) => {
     try {
-        // Group records by URL to handle duplicates properly
-        const urlGroups = new Map();
-        
-        for (const doc of batch) {
-            if (!urlGroups.has(doc.url)) {
-                urlGroups.set(doc.url, []);
+   
+
+        const operations = batch.map(doc => ({
+            updateOne: {
+                filter: { url: doc.url, date: doc.date },
+                update: {$set: doc},
+                upsert: true
             }
-            urlGroups.get(doc.url).push(doc);
-        }
-        
-        const operations = [];
-        
-        for (const [url, docs] of urlGroups) {
-            // For each URL, merge all records and create one operation
-            const mergedDoc = {
-                url: url,
-                date: new Date(Math.max(...docs.map(d => new Date(d.date).getTime()))), // Latest date
-                title: docs.find(d => d.title)?.title || '',
-                twitter: docs.find(d => d.twitter)?.twitter || '',
-                facebook: docs.find(d => d.facebook)?.facebook || '',
-                instagram: docs.find(d => d.instagram)?.instagram || '',
-                linkedin: docs.find(d => d.linkedin)?.linkedin || '',
-                youtube: docs.find(d => d.youtube)?.youtube || '',
-                pinterest: docs.find(d => d.pinterest)?.pinterest || '',
-                email: docs.find(d => d.email)?.email || '',
-                phone: [...new Set(docs.flatMap(d => d.phone || []))], // Merge and deduplicate phone arrays
-                postcode: docs.find(d => d.postcode)?.postcode || '',
-                statusCode: docs.find(d => d.statusCode)?.statusCode || '',
-                redirect_url: docs.find(d => d.redirect_url)?.redirect_url || '',
-                meta_description: docs.find(d => d.meta_description)?.meta_description || ''
-            };
-            
-            operations.push({
-                updateOne: {
-                    filter: { url: url }, // Only filter by URL
-                    update: { 
-                        $set: mergedDoc
-                    },
-                    upsert: true
-                }
-            });
-        }
+        }));
+
 
         logger.info(`Attempting to insert batch of ${operations.length} unique URLs (from ${batch.length} total records)`);
 
         // Modified MongoDB settings for better reliability
-        const result = await SocialScrape.bulkWrite(operations, { 
+        const result = await SocialScrape.bulkWrite(operations, {
             ordered: false, // Changed to false to continue on individual errors
             writeConcern: { w: 1 }, // Changed to 1 to ensure write acknowledgment
             bypassDocumentValidation: true
@@ -186,11 +154,11 @@ const insertBatch = async (batch, filename, processed, total) => {
         // Handle duplicate key errors gracefully
         if (error.code === 11000) {
             logger.warn(`Duplicate key error in batch (continuing): ${error.message}`);
-            
+
             // Try to insert records one by one to handle duplicates
             let upserted = 0;
             let modified = 0;
-            
+
             for (const [url, docs] of urlGroups) {
                 try {
                     const mergedDoc = {
@@ -210,16 +178,16 @@ const insertBatch = async (batch, filename, processed, total) => {
                         redirect_url: docs.find(d => d.redirect_url)?.redirect_url || '',
                         meta_description: docs.find(d => d.meta_description)?.meta_description || ''
                     };
-                    
+
                     const result = await SocialScrape.updateOne(
                         { url: url },
                         { $set: mergedDoc },
                         { upsert: true }
                     );
-                    
+
                     if (result.upsertedCount > 0) upserted++;
                     if (result.modifiedCount > 0) modified++;
-                    
+
                 } catch (individualError) {
                     logger.warn(`Failed to insert URL ${url}: ${individualError.message}`);
                     importProgressTracker.errors.push({
@@ -228,18 +196,18 @@ const insertBatch = async (batch, filename, processed, total) => {
                     });
                 }
             }
-            
+
             importProgressTracker.upserted += upserted;
             importProgressTracker.modified += modified;
             importProgressTracker.processed = processed;
-            
+
             return {
                 success: true,
                 upserted: upserted,
                 modified: modified
             };
         }
-        
+
         logger.error(`Error in insertBatch: ${error.message}`);
         logger.error(`Error details: ${JSON.stringify(error)}`);
         importProgressTracker.errors.push({
@@ -260,13 +228,13 @@ const processRecord = (record) => {
                 .replace(/^([^/]+).*?$/, '$1');
         };
 
-  
+
 
         const cleanSocialUrl = (url) => {
             if (!url) return '';
             // Remove everything after ? in URLs
             return url.replace(/^(https?:\/\/)/i, '')
-            .replace(/^www\./i, '').split('?')[0];
+                .replace(/^www\./i, '').split('?')[0];
         };
 
         const cleanText = (text) => {
@@ -280,7 +248,7 @@ const processRecord = (record) => {
 
         // Get the URL from the first column
         const url = Object.values(record)[0];
-        
+
         // Skip if URL is not a valid domain
         if (!isValidDomain(url)) {
             logger.debug(`Skipping invalid domain: ${url}`);
@@ -290,7 +258,7 @@ const processRecord = (record) => {
         // Skip records with error or no data
         if (record.RESULT === 'Fetch error or no data found' || record.RESULT === 'not required') {
             // If we only have URL and no other data, skip this record
-            const hasOtherData = Object.entries(record).some(([key, value]) => 
+            const hasOtherData = Object.entries(record).some(([key, value]) =>
                 key !== 'RESULT' && value && value.trim() !== ''
             );
             if (!hasOtherData) {
@@ -373,9 +341,8 @@ const processFile = async (filePath, isBlackList = false) => {
     let processed = 0;
     let batches = [];
     let currentBatch = [];
-    
-    // Map to group records by URL and merge their data
-    const urlRecordMap = new Map();
+
+  
     let skippedLines = 0;
 
     // Reset progress for new file
@@ -388,7 +355,7 @@ const processFile = async (filePath, isBlackList = false) => {
     importProgressTracker.isComplete = false;
 
     // Ensure indexes exist
-    await ensureIndexes();
+    // await ensureIndexes();
 
     return new Promise((resolve, reject) => {
         const parser = csv.parse({
@@ -406,69 +373,21 @@ const processFile = async (filePath, isBlackList = false) => {
                 try {
                     const processedRecord = processRecord(record);
                     if (processedRecord) {
-                        // Group records by URL and merge their data
-                        const url = processedRecord.url;
-                        if (!urlRecordMap.has(url)) {
-                            urlRecordMap.set(url, {
-                                url: url,
-                                date: processedRecord.date,
-                                title: processedRecord.title || '',
-                                twitter: processedRecord.twitter || '',
-                                facebook: processedRecord.facebook || '',
-                                instagram: processedRecord.instagram || '',
-                                linkedin: processedRecord.linkedin || '',
-                                youtube: processedRecord.youtube || '',
-                                pinterest: processedRecord.pinterest || '',
-                                email: processedRecord.email || '',
-                                phone: processedRecord.phone || [],
-                                postcode: processedRecord.postcode || '',
-                                statusCode: processedRecord.statusCode || '',
-                                redirect_url: processedRecord.redirect_url || '',
-                                meta_description: processedRecord.meta_description || ''
-                            });
-                        } else {
-                            // Merge data with existing record
-                            const existingRecord = urlRecordMap.get(url);
-                            
-                            // Update date to the latest one
-                            if (processedRecord.date > existingRecord.date) {
-                                existingRecord.date = processedRecord.date;
-                            }
-                            
-                            // Merge fields (prefer non-empty values)
-                            if (processedRecord.title) existingRecord.title = processedRecord.title;
-                            if (processedRecord.twitter) existingRecord.twitter = processedRecord.twitter;
-                            if (processedRecord.facebook) existingRecord.facebook = processedRecord.facebook;
-                            if (processedRecord.instagram) existingRecord.instagram = processedRecord.instagram;
-                            if (processedRecord.linkedin) existingRecord.linkedin = processedRecord.linkedin;
-                            if (processedRecord.youtube) existingRecord.youtube = processedRecord.youtube;
-                            if (processedRecord.pinterest) existingRecord.pinterest = processedRecord.pinterest;
-                            if (processedRecord.email) existingRecord.email = processedRecord.email;
-                            if (processedRecord.postcode) existingRecord.postcode = processedRecord.postcode;
-                            if (processedRecord.statusCode) existingRecord.statusCode = processedRecord.statusCode;
-                            if (processedRecord.redirect_url) existingRecord.redirect_url = processedRecord.redirect_url;
-                            if (processedRecord.meta_description) existingRecord.meta_description = processedRecord.meta_description;
-                            
-                            // For phone numbers, merge arrays
-                            if (processedRecord.phone && Array.isArray(processedRecord.phone)) {
-                                existingRecord.phone = [...new Set([...existingRecord.phone, ...processedRecord.phone])];
-                            }
-                        }
-                        
+                        currentBatch.push(processedRecord);
+                    
+
                         processed++;
                         importProgressTracker.processed = processed;
-
+                        
                         // Process in batches when we have enough unique URLs
-                        if (urlRecordMap.size >= BATCH_SIZE) {
-                            const batchData = Array.from(urlRecordMap.values());
-                            batches.push([...batchData]);
-                            urlRecordMap.clear();
-
+                        if (currentBatch.size >= BATCH_SIZE) {
+                            batches.push([...currentBatch]);
+                            currentBatch = [];
                             // Process batches when we have enough
                             if (batches.length >= PARALLEL_BATCHES) {
                                 const results = await processBatchesInParallel(batches, filename, processed);
                                 batches = [];
-                                
+
                                 // Add a small delay to allow memory cleanup
                                 await new Promise(resolve => setTimeout(resolve, 100));
                             }
@@ -476,8 +395,13 @@ const processFile = async (filePath, isBlackList = false) => {
                     }
                 } catch (error) {
                     skippedLines++;
-                    logger.warn(`Skipping malformed line in ${filename}: ${error.message}`);
-                    
+                    // console the exact line that is causing the error with the line number and data could be read from the parser.read()
+                    const line = parser.read();
+                    // log these using logger.warn
+                    logger.warn(`Skipping malformed line: ${error.message} at line: ${line}`);
+
+
+
                     // Add to errors but don't stop the process
                     importProgressTracker.errors.push({
                         filename,
@@ -490,14 +414,13 @@ const processFile = async (filePath, isBlackList = false) => {
         parser.on('end', async () => {
             try {
                 // Process remaining records
-                if (urlRecordMap.size > 0) {
-                    const batchData = Array.from(urlRecordMap.values());
-                    batches.push(batchData);
+                if (currentBatch.size > 0) {
+                    batches.push([...currentBatch]);
                 }
                 if (batches.length > 0) {
                     await processBatchesInParallel(batches, filename, processed);
                 }
-                
+
                 // Log summary of skipped lines
                 if (skippedLines > 0) {
                     logger.info(`Completed processing ${filename}. Processed: ${processed}, Skipped: ${skippedLines} malformed lines`);
@@ -506,7 +429,7 @@ const processFile = async (filePath, isBlackList = false) => {
                         error: `Skipped ${skippedLines} malformed lines during processing`
                     });
                 }
-                
+
                 await moveCompletedFile(filePath);
                 importProgressTracker.isComplete = true;
                 resolve({ filename, processed });
@@ -519,13 +442,13 @@ const processFile = async (filePath, isBlackList = false) => {
             // For CSV parsing errors, log but don't stop the entire process
             const errorMessage = `CSV parsing error (continuing with valid lines): ${error.message}`;
             logger.warn(`Error in ${filename}: ${errorMessage}`);
-            
+
             skippedLines++;
             importProgressTracker.errors.push({
                 filename,
                 error: errorMessage
             });
-            
+
             // Don't reject the promise, let it continue processing
             // The parser will skip the problematic line and continue
         });
@@ -539,19 +462,19 @@ const processFile = async (filePath, isBlackList = false) => {
 const getImportFiles = async (isBlackList = false) => {
     try {
         await ensureImportDirectory();
-        if(isBlackList){
+        if (isBlackList) {
             logger.info('Reading blacklist directory:', BLACKLIST_DIR);
         }
-        else{
+        else {
             logger.info('Reading import directory:', IMPORT_DIR);
         }
-        
-        if(isBlackList){
+
+        if (isBlackList) {
             const files = await fs.promises.readdir(BLACKLIST_DIR);
             return files.filter(file => file.endsWith('.csv'));
-        
+
         }
-        else{
+        else {
             const files = await fs.promises.readdir(IMPORT_DIR);
             return files.filter(file => file.endsWith('.csv'));
         }
@@ -652,13 +575,13 @@ const processBlacklistFile = async (filePath, urlColumn, processId) => {
 
                 const result = await SocialScrape.findOneAndUpdate(
                     { url },
-                    { 
-                        $set: { 
+                    {
+                        $set: {
                             is_blacklisted: true
                         },
                         $setOnInsert: defaultDoc
                     },
-                    { 
+                    {
                         upsert: true,
                         new: true,
                         setDefaultsOnInsert: true
@@ -684,7 +607,7 @@ const processBlacklistFile = async (filePath, urlColumn, processId) => {
         }
 
         // Archive the file after processing
-        const archiveDir = path.join(process.cwd(), 'imports', 'social_scrape_blacklisted', 'completed_'+new Date().toISOString().split('T')[0]);
+        const archiveDir = path.join(process.cwd(), 'imports', 'social_scrape_blacklisted', 'completed_' + new Date().toISOString().split('T')[0]);
         await archiveFile(filePath, {
             archiveDir,
             useTimestamp: true,
@@ -717,11 +640,11 @@ const getBlacklistProgress = (processId) => {
 // Phone number validation utility
 const isValidPhoneNumber = (phone) => {
     if (!phone || typeof phone !== 'string') return false;
-    
+
     // Clean the phone number first
     const cleanedPhone = cleanPhoneNumber(phone);
     if (!cleanedPhone) return false;
-    
+
     let digitsOnly;
     if (cleanedPhone.includes(']')) {
         // Extract number part after the closing bracket
@@ -735,13 +658,13 @@ const isValidPhoneNumber = (phone) => {
         // No formatting, just remove non-digits
         digitsOnly = cleanedPhone.replace(/\D/g, '');
     }
-    
+
     // Check if it's exactly 10 or 11 digits
     if (digitsOnly.length !== 10 && digitsOnly.length !== 11) {
         logger.debug(`Phone validation failed for "${phone}" - cleaned to "${cleanedPhone}" with ${digitsOnly.length} digits (expected 10 or 11)`);
         return false;
     }
-    
+
     logger.debug(`Phone validation passed for "${phone}" - cleaned to "${cleanedPhone}" with ${digitsOnly.length} digits`);
     return true;
 };
@@ -749,32 +672,32 @@ const isValidPhoneNumber = (phone) => {
 // Clean phone number for storage
 const cleanPhoneNumber = (phone, url = '') => {
     if (!phone || typeof phone !== 'string') return null;
-    
+
     let cleaned = phone.trim();
     logger.debug(`Cleaning phone number: "${phone}" for URL: "${url}"`);
-    
+
     // Remove spaces
     cleaned = cleaned.replace(/\s+/g, '');
-    
+
     // Remove dashes
     cleaned = cleaned.replace(/-/g, '');
-    
+
     // Remove dots (decimal points)
     cleaned = cleaned.replace(/\./g, '');
-    
+
     // Remove brackets (both round and square brackets)
     cleaned = cleaned.replace(/[\(\)\[\]]/g, '');
-    
+
     logger.debug(`After basic cleaning: "${cleaned}"`);
-    
+
     // Check for valid country codes and format accordingly
     const formattedPhone = formatPhoneWithCountryCode(cleaned, url);
-    
+
     if (!formattedPhone) {
         logger.debug(`formatPhoneWithCountryCode returned null for "${cleaned}"`);
         return null;
     }
-    
+
     logger.debug(`Final formatted phone: "${formattedPhone}"`);
     return formattedPhone;
 };
@@ -783,30 +706,30 @@ const cleanPhoneNumber = (phone, url = '') => {
 const formatPhoneWithCountryCode = (phone, url = '') => {
     // Import country phone codes
     const countryPhoneCodes = require('../utils/phone_country_code');
-    
+
     // Check if URL is UK domain for special handling
     const isUKDomain = url && (url.endsWith('.co.uk') || url.endsWith('.uk'));
-    
+
     logger.debug(`Formatting phone: "${phone}" for URL: "${url}" (UK domain: ${isUKDomain})`);
-    
+
     // Check if it starts with + (international format)
     if (phone.startsWith('+')) {
         logger.debug(`Phone starts with +, checking country codes`);
         // Find matching country code
         for (const country of countryPhoneCodes) {
             const countryCode = '+' + country.phone;
-            
+
             if (phone.startsWith(countryCode)) {
                 const numberPart = phone.substring(countryCode.length);
                 const digitsOnly = numberPart.replace(/\D/g, '');
-                
+
                 logger.debug(`Found country match: ${country.label} (${countryCode}), number part: "${numberPart}", digits: "${digitsOnly}" (length: ${digitsOnly.length})`);
-                
+
                 // Check if length is valid for this country
                 const isValidLength = checkPhoneLength(digitsOnly, country);
-                
+
                 logger.debug(`Length validation for ${country.label}: ${isValidLength} (expected: ${country.phoneLength})`);
-                
+
                 if (isValidLength) {
                     // Format with proper spacing
                     const result = `[${countryCode}] ${digitsOnly}`;
@@ -827,23 +750,23 @@ const formatPhoneWithCountryCode = (phone, url = '') => {
         }
         logger.debug(`No country code match found for "${phone}"`);
     }
-    
+
     // Check without + prefix
     logger.debug(`Checking without + prefix`);
     for (const country of countryPhoneCodes) {
         const countryCode = country.phone;
-        
+
         if (phone.startsWith(countryCode)) {
             const numberPart = phone.substring(countryCode.length);
             const digitsOnly = numberPart.replace(/\D/g, '');
-            
+
             logger.debug(`Found country match (no +): ${country.label} (${countryCode}), number part: "${numberPart}", digits: "${digitsOnly}" (length: ${digitsOnly.length})`);
-            
+
             // Check if length is valid for this country
             const isValidLength = checkPhoneLength(digitsOnly, country);
-            
+
             logger.debug(`Length validation for ${country.label}: ${isValidLength} (expected: ${country.phoneLength})`);
-            
+
             if (isValidLength) {
                 // Format with proper spacing
                 const result = `[+${countryCode}] ${digitsOnly}`;
@@ -862,7 +785,7 @@ const formatPhoneWithCountryCode = (phone, url = '') => {
             }
         }
     }
-    
+
     // If no valid country code found, keep as-is if length is 10-11 digits
     const digitsOnly = phone.replace(/\D/g, '');
     logger.debug(`No country code match, checking if digits only (${digitsOnly.length}) is 10-11 digits`);
@@ -870,7 +793,7 @@ const formatPhoneWithCountryCode = (phone, url = '') => {
         logger.debug(`Valid length for digits only, returning: "${digitsOnly}"`);
         return digitsOnly;
     }
-    
+
     logger.debug(`No valid format found for "${phone}"`);
     return null;
 };
@@ -884,12 +807,12 @@ const checkPhoneLength = (digits, country) => {
             return digits.length === country.phoneLength;
         }
     }
-    
+
     // Fallback for countries with min/max
     if (country.min && country.max) {
         return digits.length >= country.min && digits.length <= country.max;
     }
-    
+
     return false;
 };
 
@@ -902,11 +825,11 @@ const getExpectedLength = (country) => {
             return country.phoneLength;
         }
     }
-    
+
     if (country.min) {
         return country.min;
     }
-    
+
     return 10; // Default fallback
 };
 
@@ -1086,7 +1009,7 @@ const processPhoneFile = async (filePath, processId) => {
             parser.on('end', async () => {
                 try {
                     clearTimeout(timeout); // Clear timeout on successful completion
-                    
+
                     // Filter out URLs with more than 3 rows
                     const filteredUrlPhoneMap = new Map();
                     for (const [url, phoneSet] of urlPhoneMap) {
@@ -1120,13 +1043,13 @@ const processPhoneFile = async (filePath, processId) => {
                     // Mark file as completed
                     progressTracker.completedFiles++;
                     logger.info(`Marked file ${path.basename(filePath)} as completed. Total completed: ${progressTracker.completedFiles}/${progressTracker.totalFiles}`);
-                    
+
                     // Check if all files are completed
                     if (progressTracker.completedFiles >= progressTracker.totalFiles) {
                         progressTracker.isComplete = true;
                         progressTracker.currentFile = null; // Clear current file when complete
                         logger.info(`All files completed for process ${processId}. Setting isComplete = true`);
-                        
+
                         // Schedule cleanup of this progress tracker after 1 hour
                         setTimeout(() => {
                             if (phoneProgressStore.has(processId)) {
@@ -1135,7 +1058,7 @@ const processPhoneFile = async (filePath, processId) => {
                             }
                         }, 60 * 60 * 1000); // 1 hour
                     }
-                    
+
                     // Update progress tracker with timestamp
                     updateProgressTracker(processId, progressTracker);
                     phoneEventEmitter.emit('progress', { processId, ...progressTracker });
@@ -1145,13 +1068,13 @@ const processPhoneFile = async (filePath, processId) => {
                     // Mark file as completed even on error
                     progressTracker.completedFiles++;
                     logger.info(`Marked file ${path.basename(filePath)} as completed (CSV error). Total completed: ${progressTracker.completedFiles}/${progressTracker.totalFiles}`);
-                    
+
                     // Check if all files are completed
                     if (progressTracker.completedFiles >= progressTracker.totalFiles) {
                         progressTracker.isComplete = true;
                         progressTracker.currentFile = null;
                         logger.info(`All files completed for process ${processId} (with error). Setting isComplete = true`);
-                        
+
                         // Schedule cleanup of this progress tracker after 1 hour
                         setTimeout(() => {
                             if (phoneProgressStore.has(processId)) {
@@ -1160,7 +1083,7 @@ const processPhoneFile = async (filePath, processId) => {
                             }
                         }, 60 * 60 * 1000); // 1 hour
                     }
-                    
+
                     // Update progress tracker with timestamp
                     updateProgressTracker(processId, progressTracker);
                     phoneEventEmitter.emit('progress', { processId, ...progressTracker });
@@ -1173,17 +1096,17 @@ const processPhoneFile = async (filePath, processId) => {
                 const errorMsg = `CSV parsing error: ${error.message}`;
                 progressTracker.errors.push(errorMsg);
                 logger.error('CSV parsing error:', error);
-                
+
                 // Mark file as completed even on error
                 progressTracker.completedFiles++;
                 logger.info(`Marked file ${path.basename(filePath)} as completed (CSV error). Total completed: ${progressTracker.completedFiles}/${progressTracker.totalFiles}`);
-                
+
                 // Check if all files are completed
                 if (progressTracker.completedFiles >= progressTracker.totalFiles) {
                     progressTracker.isComplete = true;
                     progressTracker.currentFile = null;
                     logger.info(`All files completed for process ${processId} (with error). Setting isComplete = true`);
-                    
+
                     // Schedule cleanup of this progress tracker after 1 hour
                     setTimeout(() => {
                         if (phoneProgressStore.has(processId)) {
@@ -1192,11 +1115,11 @@ const processPhoneFile = async (filePath, processId) => {
                         }
                     }, 60 * 60 * 1000); // 1 hour
                 }
-                
+
                 // Update progress tracker with timestamp
                 updateProgressTracker(processId, progressTracker);
                 phoneEventEmitter.emit('progress', { processId, ...progressTracker });
-                
+
                 reject(error);
             });
 
@@ -1217,7 +1140,7 @@ const processPhoneBatch = async (urlPhoneMap, progressTracker, logFile) => {
         for (const [urlKey, phoneSet] of urlPhoneMap) {
             try {
                 let phones = Array.from(phoneSet);
-                
+
                 // Limit to maximum 3 phone numbers per URL
                 if (phones.length > 3) {
                     const originalCount = phones.length;
@@ -1226,29 +1149,29 @@ const processPhoneBatch = async (urlPhoneMap, progressTracker, logFile) => {
                     progressTracker.errors.push(skippedMsg);
                     await fs.promises.appendFile(logFile, `[${new Date().toISOString()}] ${skippedMsg}\n`);
                 }
-                
+
                 // Find ALL existing records with this URL
                 const existingRecords = await SocialScrape.find({ url: urlKey });
-                
+
                 logger.debug(`Processing URL: ${urlKey}, found ${existingRecords.length} existing records`);
-                
+
                 if (existingRecords.length > 0) {
                     // Update all existing records with this URL
                     for (const existingRecord of existingRecords) {
                         const existingPhones = existingRecord.phone || [];
                         const newPhones = [...new Set([...existingPhones, ...phones])];
-                        
+
                         // Limit to maximum 3 phone numbers total
                         const finalPhones = newPhones.slice(0, 3);
-                        
+
                         logger.debug(`Updating record ${existingRecord._id} for URL ${urlKey}: existing phones [${existingPhones.join(', ')}], new phones [${phones.join(', ')}], final phones [${finalPhones.join(', ')}]`);
-                        
+
                         await SocialScrape.updateOne(
                             { _id: existingRecord._id },
                             { $set: { phone: finalPhones } }
                         );
                     }
-                    
+
                     progressTracker.updated++;
                     await fs.promises.appendFile(logFile, `[${new Date().toISOString()}] Updated phone numbers for URL: ${urlKey} (${existingRecords.length} records), phones: ${phones.join(', ')}\n`);
                 } else {
@@ -1258,15 +1181,15 @@ const processPhoneBatch = async (urlPhoneMap, progressTracker, logFile) => {
                         date: new Date(),
                         phone: phones
                     };
-                    
+
                     logger.debug(`Creating new record for URL ${urlKey} with phones [${phones.join(', ')}]`);
-                    
+
                     await SocialScrape.create(newRecord);
-                    
+
                     progressTracker.created++;
                     await fs.promises.appendFile(logFile, `[${new Date().toISOString()}] Created new record for URL: ${urlKey}, phones: ${phones.join(', ')}\n`);
                 }
-                
+
             } catch (error) {
                 const errorMsg = `Error processing URL ${urlKey}: ${error.message}`;
                 progressTracker.errors.push(errorMsg);
@@ -1289,7 +1212,7 @@ const getPhoneProgress = (processId) => {
 const cleanupOldProgressTrackers = () => {
     const now = Date.now();
     const maxAge = 24 * 60 * 60 * 1000; // 24 hours
-    
+
     for (const [processId, progress] of phoneProgressStore.entries()) {
         // If process is complete and older than 24 hours, remove it
         if (progress.isComplete && progress.lastUpdated && (now - progress.lastUpdated) > maxAge) {
@@ -1328,13 +1251,13 @@ const findDuplicateUrls = async () => {
                 $sort: { count: -1 }
             }
         ]);
-        
+
         logger.info(`Found ${duplicates.length} URLs with duplicate records`);
-        
+
         for (const duplicate of duplicates.slice(0, 10)) { // Show first 10
             logger.info(`URL: ${duplicate._id}, Count: ${duplicate.count}, Records: ${duplicate.records.map(r => r._id).join(', ')}`);
         }
-        
+
         return duplicates;
     } catch (error) {
         logger.error('Error finding duplicate URLs:', error);
