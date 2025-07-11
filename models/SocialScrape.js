@@ -2,7 +2,7 @@
 const mongoose = require('mongoose');
 
   const socialScrapeSchema = new mongoose.Schema({
-    url: { type: String, required: true, unique: true },
+    url: { type: String, required: true }, // Remove unique constraint
     date: { type: Date, required: true },
     title: String,
     twitter: String,
@@ -21,8 +21,10 @@ const mongoose = require('mongoose');
   
 }, { timestamps: true, collection: 'socialscrapes', strict: false });
 
-// Remove compound index to avoid conflicts - only URL should be unique
-// socialScrapeSchema.index({ url: 1, date: 1 }, { background: true });
+// Add compound unique index on URL + date to allow multiple records with same URL but different dates
+socialScrapeSchema.index({ url: 1, date: 1 }, { unique: true, background: true });
+
+// Add index on date for sorting
 socialScrapeSchema.index({date: -1}, {background: true})
 
 // Add text index for fast URL search

@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { EventEmitter } = require('events');
 const SocialScrape = require('../models/SocialScrape');
-const logger = require('../config/logger');
+const socialScrapeLogger = require('../config/socialScrapeLogger');
 const { isValidDomain } = require('../utils/helpers');
 const { archiveFile } = require('../utils/fileUtils');
 
@@ -43,7 +43,7 @@ const ensureImportDirectory = async () => {
     try {
         await fs.promises.mkdir(IMPORT_DIR, { recursive: true });
     } catch (error) {
-        logger.error('Error creating import directory:', error);
+        socialScrapeLogger.error('Error creating import directory:', error);
         throw new Error('Failed to create import directory');
     }
 };
@@ -57,12 +57,12 @@ const resetImportProgress = () => {
     importProgressTracker.errors = [];
     importProgressTracker.isComplete = false;
     importProgressTracker.isRunning = false;
-    logger.info('Reset import progress tracker');
+    socialScrapeLogger.info('Reset import progress tracker');
 };
 
 const setImportRunning = (running) => {
     importProgressTracker.isRunning = running;
-    logger.info(`Set import running status to: ${running}`);
+    socialScrapeLogger.info(`Set import running status to: ${running}`);
 };
 
 const moveCompletedFile = async (filePath) => {
@@ -78,9 +78,9 @@ const moveCompletedFile = async (filePath) => {
         const newPath = path.join(completedDir, filename);
         await fs.promises.rename(filePath, newPath);
 
-        logger.info(`Moved file ${filename} to completed directory`);
+        socialScrapeLogger.info(`Moved file ${filename} to completed directory`);
     } catch (error) {
-        logger.error(`Failed to move file: ${error.message}`);
+        socialScrapeLogger.error(`Failed to move file: ${error.message}`);
         throw error;
     }
 };
@@ -88,10 +88,11 @@ const moveCompletedFile = async (filePath) => {
 // Ensure indexes exist for better performance
 const ensureIndexes = async () => {
     try {
-        await SocialScrape.collection.createIndex({ url: 1 }, { unique: true });
-        logger.info('Indexes created successfully');
+        // Create compound unique index on URL + date
+        await SocialScrape.collection.createIndex({ url: 1, date: 1 }, { unique: true, background: true });
+        socialScrapeLogger.info('Indexes created successfully');
     } catch (error) {
-        logger.error('Error creating indexes:', error);
+        socialScrapeLogger.error('Error creating indexes:', error);
     }
 };
 
@@ -112,25 +113,40 @@ const processBatchesInParallel = async (batches, filename, processed) => {
 
         return results;
     } catch (error) {
-        logger.error('Error processing batches:', error);
+        socialScrapeLogger.error('Error processing batches:', error);
         throw error;
     }
 };
 
 const insertBatch = async (batch, filename, processed, total) => {
     try {
-   
+        // Group records by URL + date combination to handle duplicates properly
+        const urlDateGroups = new Map();
 
-        const operations = batch.map(doc => ({
-            updateOne: {
-                filter: { url: doc.url, date: doc.date },
-                update: {$set: doc},
-                upsert: true
+        for (const doc of batch) {
+            const key = `${doc.url}_${doc.date.toISOString().split('T')[0]}`; // Use date without time for grouping
+            if (!urlDateGroups.has(key)) {
+                urlDateGroups.set(key, []);
             }
-        }));
+            urlDateGroups.get(key).push(doc);
+        }
 
+        // Create operations for each unique URL + date combination
+        const operations = [];
+        for (const [key, docs] of urlDateGroups) {
+            // Merge all records for the same URL + date combination
+            const mergedDoc = mergeRecordsForSameUrlDate(docs);
 
-        logger.info(`Attempting to insert batch of ${operations.length} unique URLs (from ${batch.length} total records)`);
+            operations.push({
+                updateOne: {
+                    filter: { url: mergedDoc.url, date: mergedDoc.date },
+                    update: { $set: mergedDoc },
+                    upsert: true
+                }
+            });
+        }
+
+        socialScrapeLogger.info(`Attempting to insert batch of ${operations.length} unique URL+date combinations (from ${batch.length} total records)`);
 
         // Modified MongoDB settings for better reliability
         const result = await SocialScrape.bulkWrite(operations, {
@@ -139,7 +155,7 @@ const insertBatch = async (batch, filename, processed, total) => {
             bypassDocumentValidation: true
         });
 
-        logger.info(`Batch insert result - Upserted: ${result.upsertedCount}, Modified: ${result.modifiedCount}`);
+        socialScrapeLogger.info(`Batch insert result - Upserted: ${result.upsertedCount}, Modified: ${result.modifiedCount}`);
 
         importProgressTracker.upserted += result.upsertedCount;
         importProgressTracker.modified += result.modifiedCount;
@@ -153,34 +169,18 @@ const insertBatch = async (batch, filename, processed, total) => {
     } catch (error) {
         // Handle duplicate key errors gracefully
         if (error.code === 11000) {
-            logger.warn(`Duplicate key error in batch (continuing): ${error.message}`);
+            socialScrapeLogger.warn(`Duplicate key error in batch (continuing): ${error.message}`);
 
             // Try to insert records one by one to handle duplicates
             let upserted = 0;
             let modified = 0;
 
-            for (const [url, docs] of urlGroups) {
+            for (const [key, docs] of urlDateGroups) {
                 try {
-                    const mergedDoc = {
-                        url: url,
-                        date: new Date(Math.max(...docs.map(d => new Date(d.date).getTime()))),
-                        title: docs.find(d => d.title)?.title || '',
-                        twitter: docs.find(d => d.twitter)?.twitter || '',
-                        facebook: docs.find(d => d.facebook)?.facebook || '',
-                        instagram: docs.find(d => d.instagram)?.instagram || '',
-                        linkedin: docs.find(d => d.linkedin)?.linkedin || '',
-                        youtube: docs.find(d => d.youtube)?.youtube || '',
-                        pinterest: docs.find(d => d.pinterest)?.pinterest || '',
-                        email: docs.find(d => d.email)?.email || '',
-                        phone: [...new Set(docs.flatMap(d => d.phone || []))],
-                        postcode: docs.find(d => d.postcode)?.postcode || '',
-                        statusCode: docs.find(d => d.statusCode)?.statusCode || '',
-                        redirect_url: docs.find(d => d.redirect_url)?.redirect_url || '',
-                        meta_description: docs.find(d => d.meta_description)?.meta_description || ''
-                    };
+                    const mergedDoc = mergeRecordsForSameUrlDate(docs);
 
                     const result = await SocialScrape.updateOne(
-                        { url: url },
+                        { url: mergedDoc.url, date: mergedDoc.date },
                         { $set: mergedDoc },
                         { upsert: true }
                     );
@@ -189,10 +189,10 @@ const insertBatch = async (batch, filename, processed, total) => {
                     if (result.modifiedCount > 0) modified++;
 
                 } catch (individualError) {
-                    logger.warn(`Failed to insert URL ${url}: ${individualError.message}`);
+                    socialScrapeLogger.warn(`Failed to insert URL+date combination ${key}: ${individualError.message}`);
                     importProgressTracker.errors.push({
                         filename,
-                        error: `Failed to insert URL ${url}: ${individualError.message}`
+                        error: `Failed to insert URL+date combination ${key}: ${individualError.message}`
                     });
                 }
             }
@@ -208,14 +208,63 @@ const insertBatch = async (batch, filename, processed, total) => {
             };
         }
 
-        logger.error(`Error in insertBatch: ${error.message}`);
-        logger.error(`Error details: ${JSON.stringify(error)}`);
+        socialScrapeLogger.error(`Error in insertBatch: ${error.message}`);
+        socialScrapeLogger.error(`Error details: ${JSON.stringify(error)}`);
         importProgressTracker.errors.push({
             filename,
             error: error.message
         });
         throw error;
     }
+};
+
+// Helper function to merge multiple records for the same URL + date combination
+const mergeRecordsForSameUrlDate = (docs) => {
+    if (docs.length === 1) {
+        return docs[0];
+    }
+
+    // Merge multiple records for the same URL + date
+    const mergedDoc = {
+        url: docs[0].url,
+        date: docs[0].date,
+        title: '',
+        twitter: '',
+        facebook: '',
+        instagram: '',
+        linkedin: '',
+        youtube: '',
+        pinterest: '',
+        email: '',
+        phone: [],
+        postcode: '',
+        statusCode: '',
+        redirect_url: '',
+        meta_description: ''
+    };
+
+    // Merge all fields from all records, taking the first non-empty value
+    for (const doc of docs) {
+        if (doc.title && !mergedDoc.title) mergedDoc.title = doc.title;
+        if (doc.twitter && !mergedDoc.twitter) mergedDoc.twitter = doc.twitter;
+        if (doc.facebook && !mergedDoc.facebook) mergedDoc.facebook = doc.facebook;
+        if (doc.instagram && !mergedDoc.instagram) mergedDoc.instagram = doc.instagram;
+        if (doc.linkedin && !mergedDoc.linkedin) mergedDoc.linkedin = doc.linkedin;
+        if (doc.youtube && !mergedDoc.youtube) mergedDoc.youtube = doc.youtube;
+        if (doc.pinterest && !mergedDoc.pinterest) mergedDoc.pinterest = doc.pinterest;
+        if (doc.email && !mergedDoc.email) mergedDoc.email = doc.email;
+        if (doc.postcode && !mergedDoc.postcode) mergedDoc.postcode = doc.postcode;
+        if (doc.statusCode && !mergedDoc.statusCode) mergedDoc.statusCode = doc.statusCode;
+        if (doc.redirect_url && !mergedDoc.redirect_url) mergedDoc.redirect_url = doc.redirect_url;
+        if (doc.meta_description && !mergedDoc.meta_description) mergedDoc.meta_description = doc.meta_description;
+
+        // Merge phone arrays
+        if (doc.phone && Array.isArray(doc.phone)) {
+            mergedDoc.phone = [...new Set([...mergedDoc.phone, ...doc.phone])];
+        }
+    }
+
+    return mergedDoc;
 };
 
 const processRecord = (record) => {
@@ -251,7 +300,7 @@ const processRecord = (record) => {
 
         // Skip if URL is not a valid domain
         if (!isValidDomain(url)) {
-            logger.debug(`Skipping invalid domain: ${url}`);
+            socialScrapeLogger.debug(`Skipping invalid domain: ${url}`);
             return null;
         }
 
@@ -262,7 +311,7 @@ const processRecord = (record) => {
                 key !== 'RESULT' && value && value.trim() !== ''
             );
             if (!hasOtherData) {
-                logger.debug(`Skipping record with no data for URL: ${url}`);
+                socialScrapeLogger.debug(`Skipping record with no data for URL: ${url}`);
                 return null;
             }
         }
@@ -270,21 +319,7 @@ const processRecord = (record) => {
         // Process the record based on CODE
         const processedRecord = {
             url: trimUrl(url),
-            date: (() => {
-                try {
-                    if (!record.DATE || !record.DATE.trim()) {
-                        return new Date();
-                    }
-                    const dateObj = new Date(record.DATE.split('/').reverse().join('-'));
-                    // Check if date is valid
-                    if (isNaN(dateObj.getTime())) {
-                        return new Date();
-                    }
-                    return dateObj;
-                } catch (error) {
-                    return new Date();
-                }
-            })()
+            date: new Date(record.DATE?.split('/').reverse().join('-')),
         };
 
         switch (record.CODE) {
@@ -327,22 +362,22 @@ const processRecord = (record) => {
                 break;
         }
 
-        logger.debug(`Processed record for URL: ${processedRecord.url}`);
+        // socialScrapeLogger.debug(`Processed record for URL: ${processedRecord.url}`);
         return processedRecord;
     } catch (error) {
-        logger.error(`Error processing record: ${error.message}`);
-        logger.error(`Record data: ${JSON.stringify(record)}`);
+        socialScrapeLogger.error(`Error processing record: ${error.message}`);
+        socialScrapeLogger.error(`Record data: ${JSON.stringify(record)}`);
         return null;
     }
 };
 
-const processFile = async (filePath, isBlackList = false) => {
+const processFile = async (filePath) => {
     const filename = path.basename(filePath);
     let processed = 0;
     let batches = [];
     let currentBatch = [];
 
-  
+
     let skippedLines = 0;
 
     // Reset progress for new file
@@ -363,7 +398,7 @@ const processFile = async (filePath, isBlackList = false) => {
             skip_empty_lines: true,
             relax_column_count: true,
             relax_quotes: true, // Be more flexible with quotes
-            skip_records_with_error: true, // Skip records with parsing errors
+            // skip_records_with_error: true, // Skip records with parsing errors
             highWaterMark: 1024 * 1024 // 1MB chunks
         });
 
@@ -374,13 +409,11 @@ const processFile = async (filePath, isBlackList = false) => {
                     const processedRecord = processRecord(record);
                     if (processedRecord) {
                         currentBatch.push(processedRecord);
-                    
-
                         processed++;
                         importProgressTracker.processed = processed;
-                        
-                        // Process in batches when we have enough unique URLs
-                        if (currentBatch.size >= BATCH_SIZE) {
+
+                        // Process in batches when we have enough records
+                        if (currentBatch.length >= BATCH_SIZE) {
                             batches.push([...currentBatch]);
                             currentBatch = [];
                             // Process batches when we have enough
@@ -398,7 +431,7 @@ const processFile = async (filePath, isBlackList = false) => {
                     // console the exact line that is causing the error with the line number and data could be read from the parser.read()
                     const line = parser.read();
                     // log these using logger.warn
-                    logger.warn(`Skipping malformed line: ${error.message} at line: ${line}`);
+                    socialScrapeLogger.error(`Skipping malformed line: ${error.message} at line: ${line}`);
 
 
 
@@ -414,7 +447,7 @@ const processFile = async (filePath, isBlackList = false) => {
         parser.on('end', async () => {
             try {
                 // Process remaining records
-                if (currentBatch.size > 0) {
+                if (currentBatch.length > 0) {
                     batches.push([...currentBatch]);
                 }
                 if (batches.length > 0) {
@@ -423,7 +456,7 @@ const processFile = async (filePath, isBlackList = false) => {
 
                 // Log summary of skipped lines
                 if (skippedLines > 0) {
-                    logger.info(`Completed processing ${filename}. Processed: ${processed}, Skipped: ${skippedLines} malformed lines`);
+                    socialScrapeLogger.info(`Completed processing ${filename}. Processed: ${processed}, Skipped: ${skippedLines} malformed lines`);
                     importProgressTracker.errors.push({
                         filename,
                         error: `Skipped ${skippedLines} malformed lines during processing`
@@ -441,7 +474,7 @@ const processFile = async (filePath, isBlackList = false) => {
         parser.on('error', (error) => {
             // For CSV parsing errors, log but don't stop the entire process
             const errorMessage = `CSV parsing error (continuing with valid lines): ${error.message}`;
-            logger.warn(`Error in ${filename}: ${errorMessage}`);
+            socialScrapeLogger.warn(`Error in ${filename}: ${errorMessage}`);
 
             skippedLines++;
             importProgressTracker.errors.push({
@@ -463,10 +496,10 @@ const getImportFiles = async (isBlackList = false) => {
     try {
         await ensureImportDirectory();
         if (isBlackList) {
-            logger.info('Reading blacklist directory:', BLACKLIST_DIR);
+            socialScrapeLogger.info('Reading blacklist directory:', BLACKLIST_DIR);
         }
         else {
-            logger.info('Reading import directory:', IMPORT_DIR);
+            socialScrapeLogger.info('Reading import directory:', IMPORT_DIR);
         }
 
         if (isBlackList) {
@@ -480,7 +513,7 @@ const getImportFiles = async (isBlackList = false) => {
         }
 
     } catch (error) {
-        logger.error('Error reading import directory:', error);
+        socialScrapeLogger.error('Error reading import directory:', error);
         return [];
     }
 };
@@ -491,7 +524,7 @@ const getBlacklistFiles = async () => {
         const files = await fs.promises.readdir(BLACKLIST_DIR);
         return files.filter(file => file.endsWith('.csv'));
     } catch (error) {
-        logger.error('Error reading blacklist directory:', error);
+        socialScrapeLogger.error('Error reading blacklist directory:', error);
         throw new Error('Failed to read blacklist directory');
     }
 };
@@ -623,7 +656,7 @@ const processBlacklistFile = async (filePath, urlColumn, processId) => {
 
     } catch (error) {
         const errorMsg = `Error processing blacklist file: ${error.message}`;
-        logger.error(errorMsg);
+        socialScrapeLogger.error(errorMsg);
         throw error;
     }
 };
@@ -661,11 +694,11 @@ const isValidPhoneNumber = (phone) => {
 
     // Check if it's exactly 10 or 11 digits
     if (digitsOnly.length !== 10 && digitsOnly.length !== 11) {
-        logger.debug(`Phone validation failed for "${phone}" - cleaned to "${cleanedPhone}" with ${digitsOnly.length} digits (expected 10 or 11)`);
+        socialScrapeLogger.debug(`Phone validation failed for "${phone}" - cleaned to "${cleanedPhone}" with ${digitsOnly.length} digits (expected 10 or 11)`);
         return false;
     }
 
-    logger.debug(`Phone validation passed for "${phone}" - cleaned to "${cleanedPhone}" with ${digitsOnly.length} digits`);
+    socialScrapeLogger.debug(`Phone validation passed for "${phone}" - cleaned to "${cleanedPhone}" with ${digitsOnly.length} digits`);
     return true;
 };
 
@@ -674,7 +707,7 @@ const cleanPhoneNumber = (phone, url = '') => {
     if (!phone || typeof phone !== 'string') return null;
 
     let cleaned = phone.trim();
-    logger.debug(`Cleaning phone number: "${phone}" for URL: "${url}"`);
+    socialScrapeLogger.debug(`Cleaning phone number: "${phone}" for URL: "${url}"`);
 
     // Remove spaces
     cleaned = cleaned.replace(/\s+/g, '');
@@ -688,17 +721,17 @@ const cleanPhoneNumber = (phone, url = '') => {
     // Remove brackets (both round and square brackets)
     cleaned = cleaned.replace(/[\(\)\[\]]/g, '');
 
-    logger.debug(`After basic cleaning: "${cleaned}"`);
+    socialScrapeLogger.debug(`After basic cleaning: "${cleaned}"`);
 
     // Check for valid country codes and format accordingly
     const formattedPhone = formatPhoneWithCountryCode(cleaned, url);
 
     if (!formattedPhone) {
-        logger.debug(`formatPhoneWithCountryCode returned null for "${cleaned}"`);
+        socialScrapeLogger.debug(`formatPhoneWithCountryCode returned null for "${cleaned}"`);
         return null;
     }
 
-    logger.debug(`Final formatted phone: "${formattedPhone}"`);
+    socialScrapeLogger.debug(`Final formatted phone: "${formattedPhone}"`);
     return formattedPhone;
 };
 
@@ -710,11 +743,11 @@ const formatPhoneWithCountryCode = (phone, url = '') => {
     // Check if URL is UK domain for special handling
     const isUKDomain = url && (url.endsWith('.co.uk') || url.endsWith('.uk'));
 
-    logger.debug(`Formatting phone: "${phone}" for URL: "${url}" (UK domain: ${isUKDomain})`);
+    socialScrapeLogger.debug(`Formatting phone: "${phone}" for URL: "${url}" (UK domain: ${isUKDomain})`);
 
     // Check if it starts with + (international format)
     if (phone.startsWith('+')) {
-        logger.debug(`Phone starts with +, checking country codes`);
+        socialScrapeLogger.debug(`Phone starts with +, checking country codes`);
         // Find matching country code
         for (const country of countryPhoneCodes) {
             const countryCode = '+' + country.phone;
@@ -723,36 +756,36 @@ const formatPhoneWithCountryCode = (phone, url = '') => {
                 const numberPart = phone.substring(countryCode.length);
                 const digitsOnly = numberPart.replace(/\D/g, '');
 
-                logger.debug(`Found country match: ${country.label} (${countryCode}), number part: "${numberPart}", digits: "${digitsOnly}" (length: ${digitsOnly.length})`);
+                socialScrapeLogger.debug(`Found country match: ${country.label} (${countryCode}), number part: "${numberPart}", digits: "${digitsOnly}" (length: ${digitsOnly.length})`);
 
                 // Check if length is valid for this country
                 const isValidLength = checkPhoneLength(digitsOnly, country);
 
-                logger.debug(`Length validation for ${country.label}: ${isValidLength} (expected: ${country.phoneLength})`);
+                socialScrapeLogger.debug(`Length validation for ${country.label}: ${isValidLength} (expected: ${country.phoneLength})`);
 
                 if (isValidLength) {
                     // Format with proper spacing
                     const result = `[${countryCode}] ${digitsOnly}`;
-                    logger.debug(`Valid length, returning: "${result}"`);
+                    socialScrapeLogger.debug(`Valid length, returning: "${result}"`);
                     return result;
                 } else {
                     // Try to add leading zero if length is short
                     const expectedLength = getExpectedLength(country);
                     if (digitsOnly.length === expectedLength - 1) {
                         const result = `[${countryCode}] 0${digitsOnly}`;
-                        logger.debug(`Added leading zero, returning: "${result}"`);
+                        socialScrapeLogger.debug(`Added leading zero, returning: "${result}"`);
                         return result;
                     } else {
-                        logger.debug(`Length mismatch: got ${digitsOnly.length}, expected ${expectedLength}, cannot add leading zero`);
+                        socialScrapeLogger.debug(`Length mismatch: got ${digitsOnly.length}, expected ${expectedLength}, cannot add leading zero`);
                     }
                 }
             }
         }
-        logger.debug(`No country code match found for "${phone}"`);
+        socialScrapeLogger.debug(`No country code match found for "${phone}"`);
     }
 
     // Check without + prefix
-    logger.debug(`Checking without + prefix`);
+    socialScrapeLogger.debug(`Checking without + prefix`);
     for (const country of countryPhoneCodes) {
         const countryCode = country.phone;
 
@@ -760,27 +793,27 @@ const formatPhoneWithCountryCode = (phone, url = '') => {
             const numberPart = phone.substring(countryCode.length);
             const digitsOnly = numberPart.replace(/\D/g, '');
 
-            logger.debug(`Found country match (no +): ${country.label} (${countryCode}), number part: "${numberPart}", digits: "${digitsOnly}" (length: ${digitsOnly.length})`);
+            socialScrapeLogger.debug(`Found country match (no +): ${country.label} (${countryCode}), number part: "${numberPart}", digits: "${digitsOnly}" (length: ${digitsOnly.length})`);
 
             // Check if length is valid for this country
             const isValidLength = checkPhoneLength(digitsOnly, country);
 
-            logger.debug(`Length validation for ${country.label}: ${isValidLength} (expected: ${country.phoneLength})`);
+            socialScrapeLogger.debug(`Length validation for ${country.label}: ${isValidLength} (expected: ${country.phoneLength})`);
 
             if (isValidLength) {
                 // Format with proper spacing
                 const result = `[+${countryCode}] ${digitsOnly}`;
-                logger.debug(`Valid length, returning: "${result}"`);
+                socialScrapeLogger.debug(`Valid length, returning: "${result}"`);
                 return result;
             } else {
                 // Try to add leading zero if length is short
                 const expectedLength = getExpectedLength(country);
                 if (digitsOnly.length === expectedLength - 1) {
                     const result = `[+${countryCode}] 0${digitsOnly}`;
-                    logger.debug(`Added leading zero, returning: "${result}"`);
+                    socialScrapeLogger.debug(`Added leading zero, returning: "${result}"`);
                     return result;
                 } else {
-                    logger.debug(`Length mismatch: got ${digitsOnly.length}, expected ${expectedLength}, cannot add leading zero`);
+                    socialScrapeLogger.debug(`Length mismatch: got ${digitsOnly.length}, expected ${expectedLength}, cannot add leading zero`);
                 }
             }
         }
@@ -788,13 +821,13 @@ const formatPhoneWithCountryCode = (phone, url = '') => {
 
     // If no valid country code found, keep as-is if length is 10-11 digits
     const digitsOnly = phone.replace(/\D/g, '');
-    logger.debug(`No country code match, checking if digits only (${digitsOnly.length}) is 10-11 digits`);
+    socialScrapeLogger.debug(`No country code match, checking if digits only (${digitsOnly.length}) is 10-11 digits`);
     if (digitsOnly.length === 10 || digitsOnly.length === 11) {
-        logger.debug(`Valid length for digits only, returning: "${digitsOnly}"`);
+        socialScrapeLogger.debug(`Valid length for digits only, returning: "${digitsOnly}"`);
         return digitsOnly;
     }
 
-    logger.debug(`No valid format found for "${phone}"`);
+    socialScrapeLogger.debug(`No valid format found for "${phone}"`);
     return null;
 };
 
@@ -846,7 +879,7 @@ const getPhoneFiles = async () => {
         const files = await fs.promises.readdir(PHONE_DIR);
         return files.filter(file => file.endsWith('.csv'));
     } catch (error) {
-        logger.error('Error reading phone directory:', error);
+        socialScrapeLogger.error('Error reading phone directory:', error);
         throw new Error('Failed to read phone directory');
     }
 };
@@ -868,9 +901,9 @@ const processPhoneFile = async (filePath, processId) => {
                 completedFiles: 0
             };
             phoneProgressStore.set(processId, progressTracker);
-            logger.warn(`Created new progress tracker for ${processId} in service (should have been initialized in controller)`);
+            socialScrapeLogger.warn(`Created new progress tracker for ${processId} in service (should have been initialized in controller)`);
         } else {
-            logger.info(`Using existing progress tracker for ${processId}: totalFiles=${progressTracker.totalFiles}`);
+            socialScrapeLogger.info(`Using existing progress tracker for ${processId}: totalFiles=${progressTracker.totalFiles}`);
         }
 
         // Update current file (don't reset other progress)
@@ -892,7 +925,7 @@ const processPhoneFile = async (filePath, processId) => {
                 const errorMsg = 'Phone processing timeout - process took too long';
                 progressTracker.errors.push(errorMsg);
                 progressTracker.completedFiles++;
-                logger.info(`Marked file ${path.basename(filePath)} as completed (timeout). Total completed: ${progressTracker.completedFiles}/${progressTracker.totalFiles}`);
+                socialScrapeLogger.info(`Marked file ${path.basename(filePath)} as completed (timeout). Total completed: ${progressTracker.completedFiles}/${progressTracker.totalFiles}`);
                 phoneEventEmitter.emit('progress', { processId, ...progressTracker });
                 reject(new Error(errorMsg));
             }, 300000); // 5 minutes timeout
@@ -1001,7 +1034,7 @@ const processPhoneFile = async (filePath, processId) => {
                     } catch (error) {
                         const errorMsg = `Line ${lineNumber}: Error processing record: ${error.message}`;
                         progressTracker.errors.push(errorMsg);
-                        logger.error(`Phone processing error on line ${lineNumber}:`, error);
+                        socialScrapeLogger.error(`Phone processing error on line ${lineNumber}:`, error);
                     }
                 }
             });
@@ -1042,19 +1075,19 @@ const processPhoneFile = async (filePath, processId) => {
 
                     // Mark file as completed
                     progressTracker.completedFiles++;
-                    logger.info(`Marked file ${path.basename(filePath)} as completed. Total completed: ${progressTracker.completedFiles}/${progressTracker.totalFiles}`);
+                    socialScrapeLogger.info(`Marked file ${path.basename(filePath)} as completed. Total completed: ${progressTracker.completedFiles}/${progressTracker.totalFiles}`);
 
                     // Check if all files are completed
                     if (progressTracker.completedFiles >= progressTracker.totalFiles) {
                         progressTracker.isComplete = true;
                         progressTracker.currentFile = null; // Clear current file when complete
-                        logger.info(`All files completed for process ${processId}. Setting isComplete = true`);
+                        socialScrapeLogger.info(`All files completed for process ${processId}. Setting isComplete = true`);
 
                         // Schedule cleanup of this progress tracker after 1 hour
                         setTimeout(() => {
                             if (phoneProgressStore.has(processId)) {
                                 phoneProgressStore.delete(processId);
-                                logger.info(`Cleaned up completed progress tracker for process: ${processId}`);
+                                socialScrapeLogger.info(`Cleaned up completed progress tracker for process: ${processId}`);
                             }
                         }, 60 * 60 * 1000); // 1 hour
                     }
@@ -1067,19 +1100,19 @@ const processPhoneFile = async (filePath, processId) => {
                     clearTimeout(timeout);
                     // Mark file as completed even on error
                     progressTracker.completedFiles++;
-                    logger.info(`Marked file ${path.basename(filePath)} as completed (CSV error). Total completed: ${progressTracker.completedFiles}/${progressTracker.totalFiles}`);
+                    socialScrapeLogger.info(`Marked file ${path.basename(filePath)} as completed (CSV error). Total completed: ${progressTracker.completedFiles}/${progressTracker.totalFiles}`);
 
                     // Check if all files are completed
                     if (progressTracker.completedFiles >= progressTracker.totalFiles) {
                         progressTracker.isComplete = true;
                         progressTracker.currentFile = null;
-                        logger.info(`All files completed for process ${processId} (with error). Setting isComplete = true`);
+                        socialScrapeLogger.info(`All files completed for process ${processId} (with error). Setting isComplete = true`);
 
                         // Schedule cleanup of this progress tracker after 1 hour
                         setTimeout(() => {
                             if (phoneProgressStore.has(processId)) {
                                 phoneProgressStore.delete(processId);
-                                logger.info(`Cleaned up completed progress tracker for process: ${processId}`);
+                                socialScrapeLogger.info(`Cleaned up completed progress tracker for process: ${processId}`);
                             }
                         }, 60 * 60 * 1000); // 1 hour
                     }
@@ -1095,23 +1128,23 @@ const processPhoneFile = async (filePath, processId) => {
                 clearTimeout(timeout);
                 const errorMsg = `CSV parsing error: ${error.message}`;
                 progressTracker.errors.push(errorMsg);
-                logger.error('CSV parsing error:', error);
+                socialScrapeLogger.error('CSV parsing error:', error);
 
                 // Mark file as completed even on error
                 progressTracker.completedFiles++;
-                logger.info(`Marked file ${path.basename(filePath)} as completed (CSV error). Total completed: ${progressTracker.completedFiles}/${progressTracker.totalFiles}`);
+                socialScrapeLogger.info(`Marked file ${path.basename(filePath)} as completed (CSV error). Total completed: ${progressTracker.completedFiles}/${progressTracker.totalFiles}`);
 
                 // Check if all files are completed
                 if (progressTracker.completedFiles >= progressTracker.totalFiles) {
                     progressTracker.isComplete = true;
                     progressTracker.currentFile = null;
-                    logger.info(`All files completed for process ${processId} (with error). Setting isComplete = true`);
+                    socialScrapeLogger.info(`All files completed for process ${processId} (with error). Setting isComplete = true`);
 
                     // Schedule cleanup of this progress tracker after 1 hour
                     setTimeout(() => {
                         if (phoneProgressStore.has(processId)) {
                             phoneProgressStore.delete(processId);
-                            logger.info(`Cleaned up completed progress tracker for process: ${processId}`);
+                            socialScrapeLogger.info(`Cleaned up completed progress tracker for process: ${processId}`);
                         }
                     }, 60 * 60 * 1000); // 1 hour
                 }
@@ -1130,7 +1163,7 @@ const processPhoneFile = async (filePath, processId) => {
 
     } catch (error) {
         const errorMsg = `Error processing phone file: ${error.message}`;
-        logger.error(errorMsg);
+        socialScrapeLogger.error(errorMsg);
         throw error;
     }
 };
@@ -1153,7 +1186,7 @@ const processPhoneBatch = async (urlPhoneMap, progressTracker, logFile) => {
                 // Find ALL existing records with this URL
                 const existingRecords = await SocialScrape.find({ url: urlKey });
 
-                logger.debug(`Processing URL: ${urlKey}, found ${existingRecords.length} existing records`);
+                socialScrapeLogger.debug(`Processing URL: ${urlKey}, found ${existingRecords.length} existing records`);
 
                 if (existingRecords.length > 0) {
                     // Update all existing records with this URL
@@ -1164,7 +1197,7 @@ const processPhoneBatch = async (urlPhoneMap, progressTracker, logFile) => {
                         // Limit to maximum 3 phone numbers total
                         const finalPhones = newPhones.slice(0, 3);
 
-                        logger.debug(`Updating record ${existingRecord._id} for URL ${urlKey}: existing phones [${existingPhones.join(', ')}], new phones [${phones.join(', ')}], final phones [${finalPhones.join(', ')}]`);
+                        socialScrapeLogger.debug(`Updating record ${existingRecord._id} for URL ${urlKey}: existing phones [${existingPhones.join(', ')}], new phones [${phones.join(', ')}], final phones [${finalPhones.join(', ')}]`);
 
                         await SocialScrape.updateOne(
                             { _id: existingRecord._id },
@@ -1182,7 +1215,7 @@ const processPhoneBatch = async (urlPhoneMap, progressTracker, logFile) => {
                         phone: phones
                     };
 
-                    logger.debug(`Creating new record for URL ${urlKey} with phones [${phones.join(', ')}]`);
+                    socialScrapeLogger.debug(`Creating new record for URL ${urlKey} with phones [${phones.join(', ')}]`);
 
                     await SocialScrape.create(newRecord);
 
@@ -1193,12 +1226,12 @@ const processPhoneBatch = async (urlPhoneMap, progressTracker, logFile) => {
             } catch (error) {
                 const errorMsg = `Error processing URL ${urlKey}: ${error.message}`;
                 progressTracker.errors.push(errorMsg);
-                logger.error(`Error processing URL ${urlKey}:`, error);
+                socialScrapeLogger.error(`Error processing URL ${urlKey}:`, error);
                 await fs.promises.appendFile(logFile, `[${new Date().toISOString()}] ${errorMsg}\n`);
             }
         }
     } catch (error) {
-        logger.error('Error processing phone batch:', error);
+        socialScrapeLogger.error('Error processing phone batch:', error);
         throw error;
     }
 };
@@ -1217,7 +1250,7 @@ const cleanupOldProgressTrackers = () => {
         // If process is complete and older than 24 hours, remove it
         if (progress.isComplete && progress.lastUpdated && (now - progress.lastUpdated) > maxAge) {
             phoneProgressStore.delete(processId);
-            logger.info(`Cleaned up old progress tracker for process: ${processId}`);
+            socialScrapeLogger.info(`Cleaned up old progress tracker for process: ${processId}`);
         }
     }
 };
@@ -1231,9 +1264,10 @@ const updateProgressTracker = (processId, updates) => {
     }
 };
 
-// Utility function to find duplicate URLs in the database
+// Utility function to find URLs with multiple records (same URL, different dates)
 const findDuplicateUrls = async () => {
     try {
+        // Find URLs that have multiple records with different dates
         const duplicates = await SocialScrape.aggregate([
             {
                 $group: {
@@ -1252,15 +1286,15 @@ const findDuplicateUrls = async () => {
             }
         ]);
 
-        logger.info(`Found ${duplicates.length} URLs with duplicate records`);
+        socialScrapeLogger.info(`Found ${duplicates.length} URLs with multiple records (different dates)`);
 
         for (const duplicate of duplicates.slice(0, 10)) { // Show first 10
-            logger.info(`URL: ${duplicate._id}, Count: ${duplicate.count}, Records: ${duplicate.records.map(r => r._id).join(', ')}`);
+            socialScrapeLogger.info(`URL: ${duplicate._id}, Count: ${duplicate.count}, Records: ${duplicate.records.map(r => r._id).join(', ')}`);
         }
 
         return duplicates;
     } catch (error) {
-        logger.error('Error finding duplicate URLs:', error);
+        socialScrapeLogger.error('Error finding URLs with multiple records:', error);
         return [];
     }
 };

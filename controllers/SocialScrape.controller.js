@@ -3,19 +3,13 @@ const { SocialScrapeService, IMPORT_DIR, BLACKLIST_DIR, PHONE_DIR, phoneProgress
 const path = require('path');
 const SocialScrape = require('../models/SocialScrape');
 const { importEventEmitter, blacklistEventEmitter, phoneEventEmitter } = require('../services/SocialScrape.service');
-const logger = require('../config/logger');
+const socialScrapeLogger = require('../config/socialScrapeLogger');
 const { v4: uuidv4 } = require('uuid');
 
 
 const startImport = async (req, res) => {
     try {
-        let blacListImport = false;
-        const { isBlackList } = req.body
-
-        if (isBlackList) {
-            blacListImport = true;
-        }
-
+    
         // Check if import is already running
         const currentProgress = SocialScrapeService.getImportProgress();
         if (currentProgress.isRunning && !currentProgress.isComplete) {
@@ -25,7 +19,7 @@ const startImport = async (req, res) => {
             });
         }
 
-        const files = await SocialScrapeService.getImportFiles(blacListImport);
+        const files = await SocialScrapeService.getImportFiles();
 
         if (files.length === 0) {
             return res.status(404).json({ message: 'No CSV files found to import' });
@@ -38,7 +32,7 @@ const startImport = async (req, res) => {
         SocialScrapeService.setImportRunning(true);
 
         // Start processing files asynchronously
-        processFiles(files, blacListImport).catch(error => {
+        processFiles(files).catch(error => {
             console.error('Error processing files:', error);
             // Set import as not running on error
             SocialScrapeService.setImportRunning(false);
@@ -54,19 +48,19 @@ const startImport = async (req, res) => {
     }
 };
 
-const processFiles = async (files, blacListImport = false) => {
+const processFiles = async (files) => {
     try {
-        logger.info(`Starting to process ${files.length} files (blacklist: ${blacListImport})`);
+        socialScrapeLogger.info(`Starting to process ${files.length} files`);
 
         for (let i = 0; i < files.length; i++) {
             const file = files[i];
             try {
-                logger.info(`Processing file ${i + 1}/${files.length}: ${file}`);
+                socialScrapeLogger.info(`Processing file ${i + 1}/${files.length}: ${file}`);
 
                 const filePath = path.join(IMPORT_DIR, file);
                 await SocialScrapeService.processFile(filePath);
 
-                logger.info(`Completed processing file ${i + 1}/${files.length}: ${file}`);
+                socialScrapeLogger.info(`Completed processing file ${i + 1}/${files.length}: ${file}`);
                 
                 // Check if import was marked as complete due to an error
                 const progress = SocialScrapeService.getImportProgress();
@@ -80,16 +74,16 @@ const processFiles = async (files, blacListImport = false) => {
                     );
                     
                     if (hasFatalErrors) {
-                        logger.info(`Import marked as complete with fatal errors, stopping file processing`);
+                        socialScrapeLogger.info(`Import marked as complete with fatal errors, stopping file processing`);
                         break;
                     }
                 }
             } catch (error) {
-                logger.error(`Error processing file ${i + 1}/${files.length} (${file}):`, error);
+                socialScrapeLogger.error(`Error processing file ${i + 1}/${files.length} (${file}):`, error);
 
                 // Check if this was a fatal error (not CSV parsing errors)
                 if (error.message.includes('CSV parsing error') || error.message.includes('Quote Not Closed')) {
-                    logger.warn(`CSV parsing error detected, but continuing with other files`);
+                    socialScrapeLogger.warn(`CSV parsing error detected, but continuing with other files`);
                     continue; // Continue with next file instead of stopping
                 }
 
@@ -103,7 +97,7 @@ const processFiles = async (files, blacListImport = false) => {
         if (progress) {
             progress.isComplete = true;
             progress.currentFile = null;
-            logger.info(`Completed processing all ${files.length} files`);
+            socialScrapeLogger.info(`Completed processing all ${files.length} files`);
             importEventEmitter.emit('progress', { ...progress });
         }
 
@@ -111,7 +105,7 @@ const processFiles = async (files, blacListImport = false) => {
         SocialScrapeService.setImportRunning(false);
 
     } catch (error) {
-        logger.error('Error in processFiles:', error);
+        socialScrapeLogger.error('Error in processFiles:', error);
 
         // Mark as complete with error
         const progress = SocialScrapeService.getImportProgress();
@@ -146,7 +140,7 @@ const getImportProgress = async (req, res) => {
             data: progress
         });
     } catch (error) {
-        logger.error('Error getting import progress:', error);
+        socialScrapeLogger.error('Error getting import progress:', error);
         res.status(500).json({ success: false, error: 'Failed to get import progress' });
     }
 };
@@ -165,7 +159,7 @@ const getBlacklistProgress = async (req, res) => {
 
         res.json(progress);
     } catch (error) {
-        logger.error('Error getting blacklist progress:', error);
+        socialScrapeLogger.error('Error getting blacklist progress:', error);
         res.status(500).json({ error: 'Failed to get blacklist progress' });
     }
 };
@@ -315,7 +309,7 @@ const updateBlacklist = async (req, res) => {
 
         // Start processing files asynchronously
         processBlacklistFiles(files, urlColumn, processId).catch(error => {
-            logger.error('Error processing blacklist files:', error);
+            socialScrapeLogger.error('Error processing blacklist files:', error);
             const progress = SocialScrapeService.getBlacklistProgress(processId);
             if (progress) {
                 progress.errors.push(error.message);
@@ -331,7 +325,7 @@ const updateBlacklist = async (req, res) => {
             files: files
         });
     } catch (error) {
-        logger.error('Error starting blacklist update:', error);
+        socialScrapeLogger.error('Error starting blacklist update:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 };
@@ -373,11 +367,11 @@ const updatePhoneNumber = async (req, res) => {
         // Store the initial progress tracker
         phoneProgressStore.set(processId, initialProgress);
 
-        logger.info(`Initialized progress tracker for ${processId}: totalFiles=${files.length}`);
+        socialScrapeLogger.info(`Initialized progress tracker for ${processId}: totalFiles=${files.length}`);
 
         // Start processing files asynchronously
         processPhoneFiles(files, processId).catch(error => {
-            logger.error('Error processing phone files:', error);
+            socialScrapeLogger.error('Error processing phone files:', error);
             const progress = SocialScrapeService.getPhoneProgress(processId);
             if (progress) {
                 progress.errors.push(error.message);
@@ -393,39 +387,39 @@ const updatePhoneNumber = async (req, res) => {
             files: files
         });
     } catch (error) {
-        logger.error('Error starting phone number update:', error);
+        socialScrapeLogger.error('Error starting phone number update:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 };
 
 const processPhoneFiles = async (files, processId) => {
     try {
-        logger.info(`Starting phone processing for ${files.length} files with process ID: ${processId}`);
+        socialScrapeLogger.info(`Starting phone processing for ${files.length} files with process ID: ${processId}`);
 
         // Get the existing progress tracker (already initialized in updatePhoneNumber)
         const progress = SocialScrapeService.getPhoneProgress(processId);
         if (!progress) {
-            logger.error(`No progress tracker found for process ID: ${processId}`);
+            socialScrapeLogger.error(`No progress tracker found for process ID: ${processId}`);
             throw new Error('Progress tracker not found');
         }
 
-        logger.info(`Using existing progress tracker for ${processId}: totalFiles=${progress.totalFiles}`);
+        socialScrapeLogger.info(`Using existing progress tracker for ${processId}: totalFiles=${progress.totalFiles}`);
 
         for (let i = 0; i < files.length; i++) {
             const file = files[i];
             try {
-                logger.info(`Processing phone file ${i + 1}/${files.length}: ${file}`);
+                socialScrapeLogger.info(`Processing phone file ${i + 1}/${files.length}: ${file}`);
                 const filePath = path.join(PHONE_DIR, file);
                 await SocialScrapeService.processPhoneFile(filePath, processId);
-                logger.info(`Completed processing phone file ${i + 1}/${files.length}: ${file}`);
+                socialScrapeLogger.info(`Completed processing phone file ${i + 1}/${files.length}: ${file}`);
 
                 // Log progress after each file
                 const currentProgress = SocialScrapeService.getPhoneProgress(processId);
                 if (currentProgress) {
-                    logger.info(`Progress after file ${file}: completedFiles=${currentProgress.completedFiles}/${currentProgress.totalFiles}, processed=${currentProgress.processed}, updated=${currentProgress.updated}, created=${currentProgress.created}`);
+                    socialScrapeLogger.info(`Progress after file ${file}: completedFiles=${currentProgress.completedFiles}/${currentProgress.totalFiles}, processed=${currentProgress.processed}, updated=${currentProgress.updated}, created=${currentProgress.created}`);
                 }
             } catch (error) {
-                logger.error(`Error processing phone file ${i + 1}/${files.length} (${file}):`, error);
+                socialScrapeLogger.error(`Error processing phone file ${i + 1}/${files.length} (${file}):`, error);
 
                 // Update progress with error
                 const progress = SocialScrapeService.getPhoneProgress(processId);
@@ -446,20 +440,20 @@ const processPhoneFiles = async (files, processId) => {
             if (!finalProgress.isComplete) {
                 finalProgress.isComplete = true;
                 finalProgress.currentFile = null; // Clear current file when complete
-                logger.info(`Completed phone processing for all files with process ID: ${processId}. Total files: ${finalProgress.totalFiles}, Completed files: ${finalProgress.completedFiles}`);
-                logger.info(`Final stats - Processed: ${finalProgress.processed}, Updated: ${finalProgress.updated}, Created: ${finalProgress.created}, Errors: ${finalProgress.errors.length}`);
+                socialScrapeLogger.info(`Completed phone processing for all files with process ID: ${processId}. Total files: ${finalProgress.totalFiles}, Completed files: ${finalProgress.completedFiles}`);
+                socialScrapeLogger.info(`Final stats - Processed: ${finalProgress.processed}, Updated: ${finalProgress.updated}, Created: ${finalProgress.created}, Errors: ${finalProgress.errors.length}`);
 
                 // Emit final progress update
                 phoneEventEmitter.emit('progress', { processId, ...finalProgress });
             } else {
-                logger.info(`Process ${processId} was already marked as complete by service`);
+                socialScrapeLogger.info(`Process ${processId} was already marked as complete by service`);
             }
         } else {
-            logger.error(`No progress tracker found for process ID: ${processId} at completion`);
+            socialScrapeLogger.error(`No progress tracker found for process ID: ${processId} at completion`);
         }
 
     } catch (error) {
-        logger.error('Error in processPhoneFiles:', error);
+        socialScrapeLogger.error('Error in processPhoneFiles:', error);
 
         // Mark process as complete with error
         const progress = SocialScrapeService.getPhoneProgress(processId);
@@ -480,15 +474,15 @@ const getPhoneProgress = async (req, res) => {
             return res.status(400).json({ error: 'Process ID is required' });
         }
 
-        logger.info(`Getting phone progress for process ID: ${processId}`);
+        socialScrapeLogger.info(`Getting phone progress for process ID: ${processId}`);
 
         const progress = SocialScrapeService.getPhoneProgress(processId);
         if (!progress) {
-            logger.warn(`No progress found for process ID: ${processId}`);
+            socialScrapeLogger.warn(`No progress found for process ID: ${processId}`);
             return res.status(404).json({ error: 'Process not found' });
         }
 
-        logger.info(`Phone progress for ${processId}:`, {
+        socialScrapeLogger.info(`Phone progress for ${processId}:`, {
             currentFile: progress.currentFile,
             processed: progress.processed,
             total: progress.total,
@@ -502,7 +496,7 @@ const getPhoneProgress = async (req, res) => {
 
         res.json(progress);
     } catch (error) {
-        logger.error('Error getting phone progress:', error);
+        socialScrapeLogger.error('Error getting phone progress:', error);
         res.status(500).json({ error: 'Failed to get phone progress' });
     }
 };
@@ -517,7 +511,7 @@ const checkDuplicateUrls = async (req, res) => {
             duplicates: duplicates.slice(0, 20) // Return first 20 for display
         });
     } catch (error) {
-        logger.error('Error checking duplicate URLs:', error);
+        socialScrapeLogger.error('Error checking duplicate URLs:', error);
         res.status(500).json({ success: false, error: 'Failed to check duplicate URLs' });
     }
 };
@@ -547,7 +541,7 @@ const stopImport = async (req, res) => {
             message: 'Import stopped successfully'
         });
     } catch (error) {
-        logger.error('Error stopping import:', error);
+        socialScrapeLogger.error('Error stopping import:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 };
@@ -587,7 +581,7 @@ const stopPhoneProcessing = async (req, res) => {
             message: 'Phone processing stopped successfully'
         });
     } catch (error) {
-        logger.error('Error stopping phone processing:', error);
+        socialScrapeLogger.error('Error stopping phone processing:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 };

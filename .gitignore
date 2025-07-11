@@ -15,6 +15,10 @@ imports/*/*.csv
 imports/*/*.log
 # the logs directory should not be ignored, but the files inside it should be
 
+# add all files in the logs folder
+logs/*
+
+
 
 
 
