@@ -1,23 +1,24 @@
 # add node_modules
 node_modules
+# Environment files
+.env
 
-# add logs files not the folder
+# Log files (but keep logs directory)
 *.log
 logs/*-audit.json
+logs/*.log
+logs/social_scrape-*.log
+logs/social_scrape-error-*.log
 
-# add all .env files
-.env
-# add all csv files in the imports folder
+# CSV files in imports
 imports/*.csv
-# add all csv files in the imports folder and subfolders
 imports/*/*.csv
-# add all log files in the imports folder and subfolders
-imports/*/*.log
-# the logs directory should not be ignored, but the files inside it should be
 
-# add all files in the logs folder
-logs/*
-
+# Completed directories (all import types)
+imports/social_scrape/completed_*
+imports/social_scrape_blacklisted/completed_*
+imports/social_scrape_phone/completed_*
+imports/*/completed_*
 
 
 
