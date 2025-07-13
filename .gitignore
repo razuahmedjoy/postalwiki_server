@@ -8,6 +8,9 @@ node_modules
 *.log
 logs/*-audit.json
 logs/*.log
+logs/social_scrape/*.log
+logs/ssUrlLogs/*.log
+logs/ssUrlLogs/*/*.log
 logs/social_scrape-*.log
 logs/social_scrape-error-*.log
 

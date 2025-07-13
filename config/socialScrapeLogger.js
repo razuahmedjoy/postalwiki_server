@@ -25,19 +25,19 @@ const socialScrapeLogger = createLogger({
             )
         }),
         new DailyRotateFile({
-            filename: 'logs/social_scrape/social_scrape-%DATE%.log',
+            filename: 'social_scrape-%DATE%.log',
             datePattern: 'YYYY-MM-DD',
             maxSize: '20m',
-            maxFiles: '10d', // Keep logs for 10 days
-            dirname: 'logs',
+            maxFiles: '30d', // Keep logs for 30 days
+            dirname: 'logs/social_scrape',
             level: 'debug'
         }),
         new DailyRotateFile({
-            filename: 'logs/social_scrape/social_scrape-error-%DATE%.log',
+            filename: 'social_scrape-error-%DATE%.log',
             datePattern: 'YYYY-MM-DD',
             maxSize: '20m',
-            maxFiles: '10d',
-            dirname: 'logs',
+            maxFiles: '30d',
+            dirname: 'logs/social_scrape',
             level: 'error'
         })
     ],
