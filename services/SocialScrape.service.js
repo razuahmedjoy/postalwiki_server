@@ -146,7 +146,7 @@ const insertBatch = async (batch, filename, processed, total) => {
             });
         }
 
-        socialScrapeLogger.info(`Attempting to insert batch of ${operations.length} unique URL+date combinations (from ${batch.length} total records)`);
+        // socialScrapeLogger.info(`Attempting to insert batch of ${operations.length} unique URL+date combinations (from ${batch.length} total records)`);
 
         // Modified MongoDB settings for better reliability
         const result = await SocialScrape.bulkWrite(operations, {
@@ -155,7 +155,7 @@ const insertBatch = async (batch, filename, processed, total) => {
             bypassDocumentValidation: true
         });
 
-        socialScrapeLogger.info(`Batch insert result - Upserted: ${result.upsertedCount}, Modified: ${result.modifiedCount}`);
+        // socialScrapeLogger.info(`Batch insert result - Upserted: ${result.upsertedCount}, Modified: ${result.modifiedCount}`);
 
         importProgressTracker.upserted += result.upsertedCount;
         importProgressTracker.modified += result.modifiedCount;

@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 
 // Ensure logs directory exists
-const logsDir = path.join(process.cwd(), 'logs');
+const logsDir = path.join(process.cwd(), 'logs/social_scrape');
 if (!fs.existsSync(logsDir)) {
     fs.mkdirSync(logsDir, { recursive: true });
 }
@@ -28,7 +28,7 @@ const socialScrapeLogger = createLogger({
             filename: 'logs/social_scrape/social_scrape-%DATE%.log',
             datePattern: 'YYYY-MM-DD',
             maxSize: '20m',
-            maxFiles: '30d', // Keep logs for 30 days
+            maxFiles: '10d', // Keep logs for 10 days
             dirname: 'logs',
             level: 'debug'
         }),
@@ -36,7 +36,7 @@ const socialScrapeLogger = createLogger({
             filename: 'logs/social_scrape/social_scrape-error-%DATE%.log',
             datePattern: 'YYYY-MM-DD',
             maxSize: '20m',
-            maxFiles: '30d',
+            maxFiles: '10d',
             dirname: 'logs',
             level: 'error'
         })

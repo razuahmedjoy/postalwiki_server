@@ -1,5 +1,6 @@
-# add node_modules
+# Dependencies
 node_modules
+
 # Environment files
 .env
 
@@ -19,7 +20,3 @@ imports/social_scrape/completed_*
 imports/social_scrape_blacklisted/completed_*
 imports/social_scrape_phone/completed_*
 imports/*/completed_*
-
-
-
-
