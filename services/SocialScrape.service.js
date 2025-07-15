@@ -1094,23 +1094,15 @@ const processPhoneBatch = async (urlPhoneMap, progressTracker, logFile) => {
                 }
                 // Find record by url and date (date only, ignore time)
                 const dateOnly = new Date(date.toISOString().split('T')[0]);
-                const existingRecord = await SocialScrape.findOne({ url, date: dateOnly }).lean();
-                if (existingRecord) {
-                    // Update phone field
-                    await SocialScrape.updateOne(
-                        { _id: existingRecord._id },
-                        { $set: { phone: phones.slice(0, 3) } }
-                    );
-                    progressTracker.updated++;
-                } else {
-                    // Create new record with url, date, phone
-                    const newRecord = {
-                        url,
-                        date: dateOnly,
-                        phone: phones.slice(0, 3)
-                    };
-                    await SocialScrape.create(newRecord);
+                const result = await SocialScrape.updateOne(
+                    { url, date: dateOnly },
+                    { $set: { phone: phones.slice(0, 3) } },
+                    { upsert: true }
+                );
+                if (result.upsertedCount > 0) {
                     progressTracker.created++;
+                } else if (result.modifiedCount > 0) {
+                    progressTracker.updated++;
                 }
             } catch (error) {
                 const errorMsg = `Error processing url+date ${urlDateKey}: ${error.message}`;
