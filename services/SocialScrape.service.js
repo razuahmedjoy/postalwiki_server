@@ -749,54 +749,10 @@ const cleanPhoneNumber = (phone) => {
     return cleaned;
 };
 
-// Format phone number with country code validation
-const formatPhoneWithCountryCode = (phone, url = '') => {
-    // Import country phone codes
 
-    return null;
-};
-
-// Check if phone number length is valid for a country
-const checkPhoneLength = (digits, country) => {
-    if (country.phoneLength) {
-        if (Array.isArray(country.phoneLength)) {
-            return country.phoneLength.includes(digits.length);
-        } else {
-            return digits.length === country.phoneLength;
-        }
-    }
-
-    // Fallback for countries with min/max
-    if (country.min && country.max) {
-        return digits.length >= country.min && digits.length <= country.max;
-    }
-
-    return false;
-};
 
 // Get expected length for a country
-const getExpectedLength = (country) => {
-    if (country.phoneLength) {
-        if (Array.isArray(country.phoneLength)) {
-            return country.phoneLength[0]; // Use first length as default
-        } else {
-            return country.phoneLength;
-        }
-    }
 
-    if (country.min) {
-        return country.min;
-    }
-
-    return 10; // Default fallback
-};
-
-// Convert various country codes to UK format (legacy function - keeping for backward compatibility)
-const convertCountryCodeToUK = (phone) => {
-    // This function is now deprecated in favor of the new country code validation
-    // Keeping it for backward compatibility but it should not be used in new logic
-    return phone;
-};
 
 const getPhoneFiles = async () => {
     try {
@@ -863,9 +819,9 @@ const processPhoneFile = async (filePath, processId) => {
                 highWaterMark: 1024 * 1024 // 1MB chunks
             });
 
-            let urlPhoneMap = new Map(); // To group phones by URL
-            let urlCountMap = new Map(); // To count occurrences of each URL
-            let processedUrls = new Set(); // Track URLs that have been processed
+            let urlPhoneMap = new Map(); // To group phones by URL+DATE
+            let urlCountMap = new Map(); // To count occurrences of each URL+DATE
+            let processedUrls = new Set(); // Track URL+DATEs that have been processed
             let lineNumber = 0;
             let totalLines = 0;
 
@@ -900,7 +856,21 @@ const processPhoneFile = async (filePath, processId) => {
                         const phoneData = record[2]?.trim();
                         // here dates are like this 28-05-2025
                         const date = record[3]?.trim();
-                        // Note: record[3] is the date, which we don't need for phone processing
+                        // Parse date to ISO (YYYY-MM-DD) for consistency
+                        let parsedDate = null;
+                        if (date) {
+                            // Accepts both DD-MM-YYYY and DD/MM/YYYY
+                            const parts = date.includes('-') ? date.split('-') : date.split('/');
+                            if (parts.length === 3) {
+                                parsedDate = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
+                            }
+                        }
+                        if (!parsedDate || isNaN(parsedDate.getTime())) {
+                            // If date is missing or invalid, skip
+                            const errorMsg = `Line ${lineNumber}: Invalid or missing date: ${date}`;
+                            progressTracker.errors.push(errorMsg);
+                            continue;
+                        }
 
                         if (!url || !code || !phoneData) {
                             const errorMsg = `Line ${lineNumber}: Missing required data - URL: ${!!url}, Code: ${!!code}, Phone: ${!!phoneData}`;
@@ -926,15 +896,6 @@ const processPhoneFile = async (filePath, processId) => {
                             continue;
                         }
 
-                        // Count URL occurrences
-                        urlCountMap.set(cleanUrl, (urlCountMap.get(cleanUrl) || 0) + 1);
-
-                        // If URL has more than 3 rows, skip it
-                        if ((urlCountMap.get(cleanUrl) || 0) > 3) {
-                            continue;
-                        }
-
-                        // Validate phone number
                         const validPhone = isValidPhoneNumber(phoneData, cleanUrl);
                         if (!validPhone) {
                             const errorMsg = `Line ${lineNumber}: Invalid phone number: ${phoneData} for URL: ${cleanUrl}`;
@@ -942,43 +903,42 @@ const processPhoneFile = async (filePath, processId) => {
                             continue;
                         }
 
-
-
                         const areaCode = getAreaCode(validPhone);
                         if (areaCode == null || validPhone.length != 11) {
                             continue;
                         }
 
                         const phoneWithArea = `${areaCode}/${validPhone}`;
-                        // Group phones by URL
-                        if (!urlPhoneMap.has(cleanUrl)) {
-                            urlPhoneMap.set(cleanUrl, new Set());
-
+                        // Group by url+date
+                        const urlDateKey = `${cleanUrl}|||${parsedDate.toISOString().split('T')[0]}`;
+                        urlCountMap.set(urlDateKey, (urlCountMap.get(urlDateKey) || 0) + 1);
+                        if ((urlCountMap.get(urlDateKey) || 0) > 3) {
+                            continue;
                         }
-                        urlPhoneMap.get(cleanUrl).add(phoneWithArea);
+                        if (!urlPhoneMap.has(urlDateKey)) {
+                            urlPhoneMap.set(urlDateKey, { phoneSet: new Set(), url: cleanUrl, date: parsedDate });
+                        }
+                        urlPhoneMap.get(urlDateKey).phoneSet.add(phoneWithArea);
 
                         progressTracker.processed++;
                         // phoneEventEmitter.emit('progress', { processId, ...progressTracker });
 
                         // Process in batches
                         if (urlPhoneMap.size >= BATCH_SIZE) {
-                            // Filter out URLs that have already been processed
-                            const unprocessedUrls = new Map();
-                            for (const [url, phoneSet] of urlPhoneMap) {
-                                if (!processedUrls.has(url)) {
-                                    unprocessedUrls.set(url, phoneSet);
+                            // Filter out url+date that have already been processed
+                            const unprocessed = new Map();
+                            for (const [key, value] of urlPhoneMap) {
+                                if (!processedUrls.has(key)) {
+                                    unprocessed.set(key, value);
                                 }
                             }
-
-                            if (unprocessedUrls.size > 0) {
-                                await processPhoneBatch(unprocessedUrls, progressTracker, logFile);
-                                // Mark these URLs as processed
-                                for (const url of unprocessedUrls.keys()) {
-                                    processedUrls.add(url);
+                            if (unprocessed.size > 0) {
+                                await processPhoneBatch(unprocessed, progressTracker, logFile);
+                                for (const key of unprocessed.keys()) {
+                                    processedUrls.add(key);
                                 }
-                                socialScrapeLogger.debug(`Processed batch: ${unprocessedUrls.size} URLs, Total processed: ${processedUrls.size}`);
+                                socialScrapeLogger.debug(`Processed batch: ${unprocessed.size} url+date, Total processed: ${processedUrls.size}`);
                             }
-
                             urlPhoneMap.clear();
                         }
 
@@ -994,18 +954,14 @@ const processPhoneFile = async (filePath, processId) => {
                 try {
                     clearTimeout(timeout); // Clear timeout on successful completion
 
-                    // Filter out URLs with more than 3 rows
+                    // Filter out url+date with more than 3 rows
                     const filteredUrlPhoneMap = new Map();
-                    for (const [url, phoneSet] of urlPhoneMap) {
-                        const urlCount = urlCountMap.get(url) || 0;
-                        if (urlCount <= 3 && !processedUrls.has(url)) {
-                            filteredUrlPhoneMap.set(url, phoneSet);
-                        } else if (urlCount > 3) {
-
+                    for (const [key, value] of urlPhoneMap) {
+                        const urlCount = urlCountMap.get(key) || 0;
+                        if (urlCount <= 3 && !processedUrls.has(key)) {
+                            filteredUrlPhoneMap.set(key, value);
                         }
                     }
-
-                    // Process remaining records
                     if (filteredUrlPhoneMap.size > 0) {
                         await processPhoneBatch(filteredUrlPhoneMap, progressTracker, logFile);
                     }
@@ -1117,10 +1073,10 @@ const processPhoneFile = async (filePath, processId) => {
 
 const processPhoneBatch = async (urlPhoneMap, progressTracker, logFile) => {
     try {
-        socialScrapeLogger.debug(`Processing batch of ${urlPhoneMap.size} URLs`);
-
-        for (const [urlKey, phoneSet] of urlPhoneMap) {
+        socialScrapeLogger.debug(`Processing batch of ${urlPhoneMap.size} url+date pairs`);
+        for (const [urlDateKey, value] of urlPhoneMap) {
             try {
+                const { phoneSet, url, date } = value;
                 const rawPhones = Array.from(phoneSet);
                 const phones = rawPhones
                     .map(p => {
@@ -1129,70 +1085,37 @@ const processPhoneBatch = async (urlPhoneMap, progressTracker, logFile) => {
                             ? { number: number.trim(), areaName: areaName.trim() }
                             : null;
                     })
-                    .filter(Boolean); // remove any malformed entries
-
-                // Limit to maximum 3 phone numbers per URL
+                    .filter(Boolean);
                 if (phones.length > 3) {
-                    // const originalCount = phones.length;
-                    // phones = phones.slice(0, 3);
-                    const skippedMsg = `skip this url: ${urlKey} as it has ${phones.length} numbers`;
+                    const skippedMsg = `skip this url+date: ${urlDateKey} as it has ${phones.length} numbers`;
                     progressTracker.errors.push(skippedMsg);
                     await fs.promises.appendFile(logFile, `[${new Date().toISOString()}] ${skippedMsg}\n`);
                     continue;
                 }
-
-                // only find the latest record, single record
-                const existingRecord = await SocialScrape.findOne({ url: urlKey }).sort({ date: -1 }).lean();
-
+                // Find record by url and date (date only, ignore time)
+                const dateOnly = new Date(date.toISOString().split('T')[0]);
+                const existingRecord = await SocialScrape.findOne({ url, date: dateOnly }).lean();
                 if (existingRecord) {
-
-                    const existingPhones = existingRecord.phone || [];
-                    const allPhonesMap = new Map();
-
-                    for (const p of existingPhones) {
-                        if (p?.number) allPhonesMap.set(p.number, p);
-                    }
-
-                    for (const p of phones) {
-                        allPhonesMap.set(p.number, p);
-                    }
-
-                    const finalPhones = Array.from(allPhonesMap.values()).slice(0, 3);
-
-                    // ✅ Update record
+                    // Update phone field
                     await SocialScrape.updateOne(
                         { _id: existingRecord._id },
-                        { $set: { phone: finalPhones } }
+                        { $set: { phone: phones.slice(0, 3) } }
                     );
-
                     progressTracker.updated++;
-                    // await fs.promises.appendFile(logFile, `[${new Date().toISOString()}] Updated phone numbers for URL: ${urlKey}, phone: ${finalPhones.map(p => p.number).join(', ')}\n`);
-                    // socialScrapeLogger.info(`Updated URL: ${urlKey}, phone: ${finalPhones.map(p => p.number).join(', ')}`);
                 } else {
-                    // Create new record only if no existing records found
+                    // Create new record with url, date, phone
                     const newRecord = {
-                        url: urlKey,
-                        date: new Date(),
+                        url,
+                        date: dateOnly,
                         phone: phones.slice(0, 3)
                     };
-
-                    // socialScrapeLogger.debug(`Creating new record for URL ${urlKey}`);
-
                     await SocialScrape.create(newRecord);
-
                     progressTracker.created++;
-                    // await fs.promises.appendFile(logFile, `[${new Date().toISOString()}] Created new record for URL: ${urlKey}\n`);
-                 
                 }
-
-                // Remove the logging from here - it was causing duplicate logs
-                // socialScrapeLogger.info(`Updated URL: ${urlKey}, phone: ${phones.map(p => p.number).join(', ')}`);
-
-
             } catch (error) {
-                const errorMsg = `Error processing URL ${urlKey}: ${error.message}`;
+                const errorMsg = `Error processing url+date ${urlDateKey}: ${error.message}`;
                 progressTracker.errors.push(errorMsg);
-                socialScrapeLogger.error(`Error processing URL ${urlKey}:`, error);
+                socialScrapeLogger.error(`Error processing url+date ${urlDateKey}:`, error);
                 await fs.promises.appendFile(logFile, `[${new Date().toISOString()}] ${errorMsg}\n`);
             }
         }
