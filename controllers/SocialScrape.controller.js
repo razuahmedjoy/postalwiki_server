@@ -2,7 +2,7 @@
 const { SocialScrapeService, IMPORT_DIR, BLACKLIST_DIR, PHONE_DIR, phoneProgressStore } = require('../services/SocialScrape.service');
 const path = require('path');
 const SocialScrape = require('../models/SocialScrape');
-const { importEventEmitter, blacklistEventEmitter, phoneEventEmitter } = require('../services/SocialScrape.service');
+// const { importEventEmitter, blacklistEventEmitter, phoneEventEmitter } = require('../services/SocialScrape.service');
 const socialScrapeLogger = require('../config/socialScrapeLogger');
 const { v4: uuidv4 } = require('uuid');
 
@@ -98,7 +98,7 @@ const processFiles = async (files) => {
             progress.isComplete = true;
             progress.currentFile = null;
             socialScrapeLogger.info(`Completed processing all ${files.length} files`);
-            importEventEmitter.emit('progress', { ...progress });
+            // importEventEmitter.emit('progress', { ...progress });
         }
 
         // Set import as not running
@@ -112,7 +112,7 @@ const processFiles = async (files) => {
         if (progress) {
             progress.isComplete = true;
             progress.errors.push(`Process failed: ${error.message}`);
-            importEventEmitter.emit('progress', { ...progress });
+            // importEventEmitter.emit('progress', { ...progress });
         }
 
         // Set import as not running
@@ -314,7 +314,7 @@ const updateBlacklist = async (req, res) => {
             if (progress) {
                 progress.errors.push(error.message);
                 progress.isComplete = true;
-                blacklistEventEmitter.emit('progress', { processId, ...progress });
+                // blacklistEventEmitter.emit('progress', { processId, ...progress });
             }
         });
 
@@ -376,7 +376,7 @@ const updatePhoneNumber = async (req, res) => {
             if (progress) {
                 progress.errors.push(error.message);
                 progress.isComplete = true;
-                phoneEventEmitter.emit('progress', { processId, ...progress });
+                // phoneEventEmitter.emit('progress', { processId, ...progress });
             }
         });
 
@@ -444,7 +444,7 @@ const processPhoneFiles = async (files, processId) => {
                 socialScrapeLogger.info(`Final stats - Processed: ${finalProgress.processed}, Updated: ${finalProgress.updated}, Created: ${finalProgress.created}, Errors: ${finalProgress.errors.length}`);
 
                 // Emit final progress update
-                phoneEventEmitter.emit('progress', { processId, ...finalProgress });
+                // phoneEventEmitter.emit('progress', { processId, ...finalProgress });
             } else {
                 socialScrapeLogger.info(`Process ${processId} was already marked as complete by service`);
             }
@@ -460,7 +460,7 @@ const processPhoneFiles = async (files, processId) => {
         if (progress) {
             progress.isComplete = true;
             progress.errors.push(`Process failed: ${error.message}`);
-            phoneEventEmitter.emit('progress', { processId, ...progress });
+            // phoneEventEmitter.emit('progress', { processId, ...progress });
         }
 
         throw error;
@@ -474,7 +474,7 @@ const getPhoneProgress = async (req, res) => {
             return res.status(400).json({ error: 'Process ID is required' });
         }
 
-        socialScrapeLogger.info(`Getting phone progress for process ID: ${processId}`);
+        // socialScrapeLogger.info(`Getting phone progress for process ID: ${processId}`);
 
         const progress = SocialScrapeService.getPhoneProgress(processId);
         if (!progress) {
@@ -482,17 +482,17 @@ const getPhoneProgress = async (req, res) => {
             return res.status(404).json({ error: 'Process not found' });
         }
 
-        socialScrapeLogger.info(`Phone progress for ${processId}:`, {
-            currentFile: progress.currentFile,
-            processed: progress.processed,
-            total: progress.total,
-            updated: progress.updated,
-            created: progress.created,
-            errors: progress.errors.length,
-            isComplete: progress.isComplete,
-            totalFiles: progress.totalFiles,
-            completedFiles: progress.completedFiles
-        });
+        // socialScrapeLogger.info(`Phone progress for ${processId}:`, {
+        //     currentFile: progress.currentFile,
+        //     processed: progress.processed,
+        //     total: progress.total,
+        //     updated: progress.updated,
+        //     created: progress.created,
+        //     errors: progress.errors.length,
+        //     isComplete: progress.isComplete,
+        //     totalFiles: progress.totalFiles,
+        //     completedFiles: progress.completedFiles
+        // });
 
         res.json(progress);
     } catch (error) {
@@ -501,20 +501,7 @@ const getPhoneProgress = async (req, res) => {
     }
 };
 
-const checkDuplicateUrls = async (req, res) => {
-    try {
-        const duplicates = await SocialScrapeService.findDuplicateUrls();
 
-        res.json({
-            success: true,
-            message: `Found ${duplicates.length} URLs with duplicate records`,
-            duplicates: duplicates.slice(0, 20) // Return first 20 for display
-        });
-    } catch (error) {
-        socialScrapeLogger.error('Error checking duplicate URLs:', error);
-        res.status(500).json({ success: false, error: 'Failed to check duplicate URLs' });
-    }
-};
 
 const stopImport = async (req, res) => {
     try {
@@ -533,7 +520,7 @@ const stopImport = async (req, res) => {
         if (progress) {
             progress.isComplete = true;
             progress.errors.push('Import was stopped by user');
-            importEventEmitter.emit('progress', { ...progress });
+            // importEventEmitter.emit('progress', { ...progress });
         }
 
         res.json({
@@ -574,7 +561,7 @@ const stopPhoneProcessing = async (req, res) => {
         SocialScrapeService.updateProgressTracker(processId, progress);
 
         // Emit progress update
-        phoneEventEmitter.emit('progress', { processId, ...progress });
+        // phoneEventEmitter.emit('progress', { processId, ...progress });
 
         res.json({
             success: true,
@@ -597,7 +584,6 @@ const SocialScrapeController = {
     getProgress,
     updatePhoneNumber,
     stopPhoneProcessing,
-    checkDuplicateUrls,
     stopImport,
 };
 

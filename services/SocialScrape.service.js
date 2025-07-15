@@ -2,23 +2,24 @@
 const csv = require('csv-parse');
 const fs = require('fs');
 const path = require('path');
-const { EventEmitter } = require('events');
+// const { EventEmitter } = require('events');
 const SocialScrape = require('../models/SocialScrape');
 const socialScrapeLogger = require('../config/socialScrapeLogger');
 const { isValidDomain } = require('../utils/helpers');
 const { archiveFile } = require('../utils/fileUtils');
+const { areaCodes } = require('../utils/areaCodes');
 
 // Reduced batch size and parallel processing for 4GB RAM, 2-core VPS
-const BATCH_SIZE = 1000; // Reduced from 50000 to 1000 for better reliability
+const BATCH_SIZE = 2000; // Reduced from 50000 to 1000 for better reliability
 const PARALLEL_BATCHES = 2; // Reduced to match CPU cores
 const IMPORT_DIR = path.join(__dirname, '../imports/social_scrape');
 const BLACKLIST_DIR = path.join(__dirname, '../imports/social_scrape_blacklisted');
 const PHONE_DIR = path.join(__dirname, '../imports/social_scrape_phone');
 
-// Create separate event emitters for each process
-const importEventEmitter = new EventEmitter();
-const blacklistEventEmitter = new EventEmitter();
-const phoneEventEmitter = new EventEmitter();
+// // Create separate event emitters for each process
+// const importEventEmitter = new EventEmitter();
+// const blacklistEventEmitter = new EventEmitter();
+// const phoneEventEmitter = new EventEmitter();
 
 // Separate progress trackers for each process
 const importProgressTracker = {
@@ -630,7 +631,7 @@ const processBlacklistFile = async (filePath, urlColumn, processId) => {
                 }
 
                 progressTracker.processed++;
-                blacklistEventEmitter.emit('progress', { processId, ...progressTracker });
+                // blacklistEventEmitter.emit('progress', { processId, ...progressTracker });
 
             } catch (error) {
                 const errorMsg = `Error processing record: ${error.message}`;
@@ -652,7 +653,7 @@ const processBlacklistFile = async (filePath, urlColumn, processId) => {
         await fs.promises.appendFile(logFile, `[${new Date().toISOString()}] Processing completed. Processed: ${progressTracker.processed}, Upserted: ${progressTracker.upserted}, Modified: ${progressTracker.modified}, Errors: ${progressTracker.errors.length}\n`);
 
         progressTracker.isComplete = true;
-        blacklistEventEmitter.emit('progress', { processId, ...progressTracker });
+        // blacklistEventEmitter.emit('progress', { processId, ...progressTracker });
 
     } catch (error) {
         const errorMsg = `Error processing blacklist file: ${error.message}`;
@@ -670,50 +671,50 @@ const getBlacklistProgress = (processId) => {
     return progress ? { ...progress } : null;
 };
 
+const getAreaCode = (phone) => {
+    const areaCode = areaCodes.find(area => phone.startsWith(area.code));
+    return areaCode ? areaCode.areaName : null;
+};
+
 // Phone number validation utility
-const isValidPhoneNumber = (phone) => {
+const isValidPhoneNumber = (phone, url) => {
     if (!phone || typeof phone !== 'string') return false;
 
     // Clean the phone number first
     const cleanedPhone = cleanPhoneNumber(phone);
     if (!cleanedPhone) return false;
 
-    let digitsOnly;
-    if (cleanedPhone.includes(']')) {
-        // Extract number part after the closing bracket
-        const parts = cleanedPhone.split('] ');
-        if (parts.length === 2) {
-            digitsOnly = parts[1].replace(/\D/g, '');
-        } else {
-            digitsOnly = cleanedPhone.replace(/\D/g, '');
-        }
-    } else {
-        // No formatting, just remove non-digits
-        digitsOnly = cleanedPhone.replace(/\D/g, '');
-    }
 
-    // Check if it's exactly 10 or 11 digits
-    if (digitsOnly.length !== 10 && digitsOnly.length !== 11) {
-        socialScrapeLogger.debug(`Phone validation failed for "${phone}" - cleaned to "${cleanedPhone}" with ${digitsOnly.length} digits (expected 10 or 11)`);
-        return false;
-    }
 
-    socialScrapeLogger.debug(`Phone validation passed for "${phone}" - cleaned to "${cleanedPhone}" with ${digitsOnly.length} digits`);
-    return true;
+    return cleanedPhone ? cleanedPhone : false;
 };
 
 // Clean phone number for storage
-const cleanPhoneNumber = (phone, url = '') => {
+const cleanPhoneNumber = (phone) => {
     if (!phone || typeof phone !== 'string') return null;
 
     let cleaned = phone.trim();
-    socialScrapeLogger.debug(`Cleaning phone number: "${phone}" for URL: "${url}"`);
+
+    // Handle scientific notation (e.g., 4.41245E+11, 4.41245E-11)
+    if (cleaned.match(/[Ee][+-]?\d+/)) {
+        try {
+            // Convert scientific notation to full number
+            const number = parseFloat(cleaned);
+            if (!isNaN(number)) {
+                cleaned = Math.floor(number).toString(); // Use Math.floor to avoid decimal places
+            }
+        } catch (error) {
+            socialScrapeLogger.warn(`Failed to parse scientific notation: ${cleaned}`);
+        }
+    }
 
     // Remove spaces
     cleaned = cleaned.replace(/\s+/g, '');
-
     // Remove dashes
     cleaned = cleaned.replace(/-/g, '');
+
+    // remove + 
+    cleaned = cleaned.replace('+', '');
 
     // Remove dots (decimal points)
     cleaned = cleaned.replace(/\./g, '');
@@ -721,113 +722,37 @@ const cleanPhoneNumber = (phone, url = '') => {
     // Remove brackets (both round and square brackets)
     cleaned = cleaned.replace(/[\(\)\[\]]/g, '');
 
-    socialScrapeLogger.debug(`After basic cleaning: "${cleaned}"`);
 
-    // Check for valid country codes and format accordingly
-    const formattedPhone = formatPhoneWithCountryCode(cleaned, url);
 
-    if (!formattedPhone) {
-        socialScrapeLogger.debug(`formatPhoneWithCountryCode returned null for "${cleaned}"`);
-        return null;
+    // keep only numbers, no other characters or special characters
+    cleaned = cleaned.replace(/[^0-9]/g, '');
+
+    // Validate phone number length (UK numbers are typically 10-11 digits)
+    // if (cleaned.length < 10 || cleaned.length > 15) {
+    //     socialScrapeLogger.warn(`Phone number length seems invalid: ${cleaned} (length: ${cleaned.length})`);
+    //     return null;
+    // }
+
+    if (cleaned.startsWith('44')) {
+        if (cleaned.length == 12) {
+            cleaned = cleaned.slice(2);
+            cleaned = '0' + cleaned;
+        }
+        if (cleaned.length == 13) {
+            cleaned = cleaned.slice(2);
+        }
+    }
+    if (cleaned.length == 10 && !cleaned.startsWith('44') && !cleaned.startsWith('0')) {
+        cleaned = '0' + cleaned;
     }
 
-    socialScrapeLogger.debug(`Final formatted phone: "${formattedPhone}"`);
-    return formattedPhone;
+    return cleaned;
 };
 
 // Format phone number with country code validation
 const formatPhoneWithCountryCode = (phone, url = '') => {
     // Import country phone codes
-    const countryPhoneCodes = require('../utils/phone_country_code');
 
-    // Check if URL is UK domain for special handling
-    const isUKDomain = url && (url.endsWith('.co.uk') || url.endsWith('.uk'));
-
-    socialScrapeLogger.debug(`Formatting phone: "${phone}" for URL: "${url}" (UK domain: ${isUKDomain})`);
-
-    // Check if it starts with + (international format)
-    if (phone.startsWith('+')) {
-        socialScrapeLogger.debug(`Phone starts with +, checking country codes`);
-        // Find matching country code
-        for (const country of countryPhoneCodes) {
-            const countryCode = '+' + country.phone;
-
-            if (phone.startsWith(countryCode)) {
-                const numberPart = phone.substring(countryCode.length);
-                const digitsOnly = numberPart.replace(/\D/g, '');
-
-                socialScrapeLogger.debug(`Found country match: ${country.label} (${countryCode}), number part: "${numberPart}", digits: "${digitsOnly}" (length: ${digitsOnly.length})`);
-
-                // Check if length is valid for this country
-                const isValidLength = checkPhoneLength(digitsOnly, country);
-
-                socialScrapeLogger.debug(`Length validation for ${country.label}: ${isValidLength} (expected: ${country.phoneLength})`);
-
-                if (isValidLength) {
-                    // Format with proper spacing
-                    const result = `[${countryCode}] ${digitsOnly}`;
-                    socialScrapeLogger.debug(`Valid length, returning: "${result}"`);
-                    return result;
-                } else {
-                    // Try to add leading zero if length is short
-                    const expectedLength = getExpectedLength(country);
-                    if (digitsOnly.length === expectedLength - 1) {
-                        const result = `[${countryCode}] 0${digitsOnly}`;
-                        socialScrapeLogger.debug(`Added leading zero, returning: "${result}"`);
-                        return result;
-                    } else {
-                        socialScrapeLogger.debug(`Length mismatch: got ${digitsOnly.length}, expected ${expectedLength}, cannot add leading zero`);
-                    }
-                }
-            }
-        }
-        socialScrapeLogger.debug(`No country code match found for "${phone}"`);
-    }
-
-    // Check without + prefix
-    socialScrapeLogger.debug(`Checking without + prefix`);
-    for (const country of countryPhoneCodes) {
-        const countryCode = country.phone;
-
-        if (phone.startsWith(countryCode)) {
-            const numberPart = phone.substring(countryCode.length);
-            const digitsOnly = numberPart.replace(/\D/g, '');
-
-            socialScrapeLogger.debug(`Found country match (no +): ${country.label} (${countryCode}), number part: "${numberPart}", digits: "${digitsOnly}" (length: ${digitsOnly.length})`);
-
-            // Check if length is valid for this country
-            const isValidLength = checkPhoneLength(digitsOnly, country);
-
-            socialScrapeLogger.debug(`Length validation for ${country.label}: ${isValidLength} (expected: ${country.phoneLength})`);
-
-            if (isValidLength) {
-                // Format with proper spacing
-                const result = `[+${countryCode}] ${digitsOnly}`;
-                socialScrapeLogger.debug(`Valid length, returning: "${result}"`);
-                return result;
-            } else {
-                // Try to add leading zero if length is short
-                const expectedLength = getExpectedLength(country);
-                if (digitsOnly.length === expectedLength - 1) {
-                    const result = `[+${countryCode}] 0${digitsOnly}`;
-                    socialScrapeLogger.debug(`Added leading zero, returning: "${result}"`);
-                    return result;
-                } else {
-                    socialScrapeLogger.debug(`Length mismatch: got ${digitsOnly.length}, expected ${expectedLength}, cannot add leading zero`);
-                }
-            }
-        }
-    }
-
-    // If no valid country code found, keep as-is if length is 10-11 digits
-    const digitsOnly = phone.replace(/\D/g, '');
-    socialScrapeLogger.debug(`No country code match, checking if digits only (${digitsOnly.length}) is 10-11 digits`);
-    if (digitsOnly.length === 10 || digitsOnly.length === 11) {
-        socialScrapeLogger.debug(`Valid length for digits only, returning: "${digitsOnly}"`);
-        return digitsOnly;
-    }
-
-    socialScrapeLogger.debug(`No valid format found for "${phone}"`);
     return null;
 };
 
@@ -926,7 +851,7 @@ const processPhoneFile = async (filePath, processId) => {
                 progressTracker.errors.push(errorMsg);
                 progressTracker.completedFiles++;
                 socialScrapeLogger.info(`Marked file ${path.basename(filePath)} as completed (timeout). Total completed: ${progressTracker.completedFiles}/${progressTracker.totalFiles}`);
-                phoneEventEmitter.emit('progress', { processId, ...progressTracker });
+                // phoneEventEmitter.emit('progress', { processId, ...progressTracker });
                 reject(new Error(errorMsg));
             }, 300000); // 5 minutes timeout
 
@@ -940,6 +865,7 @@ const processPhoneFile = async (filePath, processId) => {
 
             let urlPhoneMap = new Map(); // To group phones by URL
             let urlCountMap = new Map(); // To count occurrences of each URL
+            let processedUrls = new Set(); // Track URLs that have been processed
             let lineNumber = 0;
             let totalLines = 0;
 
@@ -954,7 +880,7 @@ const processPhoneFile = async (filePath, processId) => {
             countLines().then((lineCount) => {
                 totalLines = lineCount;
                 progressTracker.total += lineCount;
-                phoneEventEmitter.emit('progress', { processId, ...progressTracker });
+                // phoneEventEmitter.emit('progress', { processId, ...progressTracker });
             });
 
             parser.on('readable', async () => {
@@ -972,6 +898,8 @@ const processPhoneFile = async (filePath, processId) => {
                         const url = record[0]?.trim();
                         const code = record[1]?.trim();
                         const phoneData = record[2]?.trim();
+                        // here dates are like this 28-05-2025
+                        const date = record[3]?.trim();
                         // Note: record[3] is the date, which we don't need for phone processing
 
                         if (!url || !code || !phoneData) {
@@ -987,10 +915,10 @@ const processPhoneFile = async (filePath, processId) => {
 
                         // Clean and validate URL
                         const cleanUrl = url
-                            .replace(/^(https?:\/\/)/i, '')
-                            .replace(/^www\./i, '')
-                            .replace(/^([^/]+).*?$/, '$1')
-                            .toLowerCase();
+                            .replace(/^(https?:\/\/)/i, '') // remove http:// or https://
+                            .replace(/^www\./i, '') // remove www.
+                            .replace(/^([^/]+).*?$/, '$1') // remove everything after the first /
+                            .toLowerCase(); // make lowercase
 
                         if (!isValidDomain(cleanUrl)) {
                             const errorMsg = `Line ${lineNumber}: Invalid domain format: ${cleanUrl}`;
@@ -1001,33 +929,56 @@ const processPhoneFile = async (filePath, processId) => {
                         // Count URL occurrences
                         urlCountMap.set(cleanUrl, (urlCountMap.get(cleanUrl) || 0) + 1);
 
+                        // If URL has more than 3 rows, skip it
+                        if ((urlCountMap.get(cleanUrl) || 0) > 3) {
+                            continue;
+                        }
+
                         // Validate phone number
-                        if (!isValidPhoneNumber(phoneData)) {
+                        const validPhone = isValidPhoneNumber(phoneData, cleanUrl);
+                        if (!validPhone) {
                             const errorMsg = `Line ${lineNumber}: Invalid phone number: ${phoneData} for URL: ${cleanUrl}`;
                             progressTracker.errors.push(errorMsg);
                             continue;
                         }
 
-                        // Clean phone number
-                        const cleanPhone = cleanPhoneNumber(phoneData, cleanUrl);
-                        if (!cleanPhone) {
-                            const errorMsg = `Line ${lineNumber}: Failed to clean phone number: ${phoneData} for URL: ${cleanUrl}`;
-                            progressTracker.errors.push(errorMsg);
+
+
+                        const areaCode = getAreaCode(validPhone);
+                        if (areaCode == null || validPhone.length != 11) {
                             continue;
                         }
 
+                        const phoneWithArea = `${areaCode}/${validPhone}`;
                         // Group phones by URL
                         if (!urlPhoneMap.has(cleanUrl)) {
                             urlPhoneMap.set(cleanUrl, new Set());
+
                         }
-                        urlPhoneMap.get(cleanUrl).add(cleanPhone);
+                        urlPhoneMap.get(cleanUrl).add(phoneWithArea);
 
                         progressTracker.processed++;
-                        phoneEventEmitter.emit('progress', { processId, ...progressTracker });
+                        // phoneEventEmitter.emit('progress', { processId, ...progressTracker });
 
                         // Process in batches
                         if (urlPhoneMap.size >= BATCH_SIZE) {
-                            await processPhoneBatch(urlPhoneMap, progressTracker, logFile);
+                            // Filter out URLs that have already been processed
+                            const unprocessedUrls = new Map();
+                            for (const [url, phoneSet] of urlPhoneMap) {
+                                if (!processedUrls.has(url)) {
+                                    unprocessedUrls.set(url, phoneSet);
+                                }
+                            }
+
+                            if (unprocessedUrls.size > 0) {
+                                await processPhoneBatch(unprocessedUrls, progressTracker, logFile);
+                                // Mark these URLs as processed
+                                for (const url of unprocessedUrls.keys()) {
+                                    processedUrls.add(url);
+                                }
+                                socialScrapeLogger.debug(`Processed batch: ${unprocessedUrls.size} URLs, Total processed: ${processedUrls.size}`);
+                            }
+
                             urlPhoneMap.clear();
                         }
 
@@ -1047,12 +998,10 @@ const processPhoneFile = async (filePath, processId) => {
                     const filteredUrlPhoneMap = new Map();
                     for (const [url, phoneSet] of urlPhoneMap) {
                         const urlCount = urlCountMap.get(url) || 0;
-                        if (urlCount <= 3) {
+                        if (urlCount <= 3 && !processedUrls.has(url)) {
                             filteredUrlPhoneMap.set(url, phoneSet);
-                        } else {
-                            const errorMsg = `Skipped URL ${url} - has ${urlCount} rows (more than 3)`;
-                            progressTracker.errors.push(errorMsg);
-                            await fs.promises.appendFile(logFile, `[${new Date().toISOString()}] ${errorMsg}\n`);
+                        } else if (urlCount > 3) {
+
                         }
                     }
 
@@ -1065,9 +1014,7 @@ const processPhoneFile = async (filePath, processId) => {
                     const archiveDir = path.join(process.cwd(), 'imports', 'social_scrape_phone', 'completed_' + new Date().toISOString().split('T')[0]);
                     await archiveFile(filePath, {
                         archiveDir,
-                        useTimestamp: true,
-                        timestampFormat: 'ISO',
-                        prefix: 'phone'
+                        useTimestamp: false
                     });
 
                     // Log completion
@@ -1094,7 +1041,7 @@ const processPhoneFile = async (filePath, processId) => {
 
                     // Update progress tracker with timestamp
                     updateProgressTracker(processId, progressTracker);
-                    phoneEventEmitter.emit('progress', { processId, ...progressTracker });
+                    // phoneEventEmitter.emit('progress', { processId, ...progressTracker });
                     resolve({ filename: path.basename(filePath), processed: progressTracker.processed });
                 } catch (error) {
                     clearTimeout(timeout);
@@ -1119,7 +1066,7 @@ const processPhoneFile = async (filePath, processId) => {
 
                     // Update progress tracker with timestamp
                     updateProgressTracker(processId, progressTracker);
-                    phoneEventEmitter.emit('progress', { processId, ...progressTracker });
+                    // phoneEventEmitter.emit('progress', { processId, ...progressTracker });
                     reject(error);
                 }
             });
@@ -1151,7 +1098,7 @@ const processPhoneFile = async (filePath, processId) => {
 
                 // Update progress tracker with timestamp
                 updateProgressTracker(processId, progressTracker);
-                phoneEventEmitter.emit('progress', { processId, ...progressTracker });
+                // phoneEventEmitter.emit('progress', { processId, ...progressTracker });
 
                 reject(error);
             });
@@ -1170,58 +1117,77 @@ const processPhoneFile = async (filePath, processId) => {
 
 const processPhoneBatch = async (urlPhoneMap, progressTracker, logFile) => {
     try {
+        socialScrapeLogger.debug(`Processing batch of ${urlPhoneMap.size} URLs`);
+
         for (const [urlKey, phoneSet] of urlPhoneMap) {
             try {
-                let phones = Array.from(phoneSet);
+                const rawPhones = Array.from(phoneSet);
+                const phones = rawPhones
+                    .map(p => {
+                        const [areaName, number] = p.split('/');
+                        return number && areaName
+                            ? { number: number.trim(), areaName: areaName.trim() }
+                            : null;
+                    })
+                    .filter(Boolean); // remove any malformed entries
 
                 // Limit to maximum 3 phone numbers per URL
                 if (phones.length > 3) {
-                    const originalCount = phones.length;
-                    phones = phones.slice(0, 3);
-                    const skippedMsg = `Limited phone numbers for URL ${urlKey} from ${originalCount} to 3`;
+                    // const originalCount = phones.length;
+                    // phones = phones.slice(0, 3);
+                    const skippedMsg = `skip this url: ${urlKey} as it has ${phones.length} numbers`;
                     progressTracker.errors.push(skippedMsg);
                     await fs.promises.appendFile(logFile, `[${new Date().toISOString()}] ${skippedMsg}\n`);
+                    continue;
                 }
 
-                // Find ALL existing records with this URL
-                const existingRecords = await SocialScrape.find({ url: urlKey });
+                // only find the latest record, single record
+                const existingRecord = await SocialScrape.findOne({ url: urlKey }).sort({ date: -1 }).lean();
 
-                socialScrapeLogger.debug(`Processing URL: ${urlKey}, found ${existingRecords.length} existing records`);
+                if (existingRecord) {
 
-                if (existingRecords.length > 0) {
-                    // Update all existing records with this URL
-                    for (const existingRecord of existingRecords) {
-                        const existingPhones = existingRecord.phone || [];
-                        const newPhones = [...new Set([...existingPhones, ...phones])];
+                    const existingPhones = existingRecord.phone || [];
+                    const allPhonesMap = new Map();
 
-                        // Limit to maximum 3 phone numbers total
-                        const finalPhones = newPhones.slice(0, 3);
-
-                        socialScrapeLogger.debug(`Updating record ${existingRecord._id} for URL ${urlKey}: existing phones [${existingPhones.join(', ')}], new phones [${phones.join(', ')}], final phones [${finalPhones.join(', ')}]`);
-
-                        await SocialScrape.updateOne(
-                            { _id: existingRecord._id },
-                            { $set: { phone: finalPhones } }
-                        );
+                    for (const p of existingPhones) {
+                        if (p?.number) allPhonesMap.set(p.number, p);
                     }
 
+                    for (const p of phones) {
+                        allPhonesMap.set(p.number, p);
+                    }
+
+                    const finalPhones = Array.from(allPhonesMap.values()).slice(0, 3);
+
+                    // ✅ Update record
+                    await SocialScrape.updateOne(
+                        { _id: existingRecord._id },
+                        { $set: { phone: finalPhones } }
+                    );
+
                     progressTracker.updated++;
-                    await fs.promises.appendFile(logFile, `[${new Date().toISOString()}] Updated phone numbers for URL: ${urlKey} (${existingRecords.length} records), phones: ${phones.join(', ')}\n`);
+                    // await fs.promises.appendFile(logFile, `[${new Date().toISOString()}] Updated phone numbers for URL: ${urlKey}, phone: ${finalPhones.map(p => p.number).join(', ')}\n`);
+                    // socialScrapeLogger.info(`Updated URL: ${urlKey}, phone: ${finalPhones.map(p => p.number).join(', ')}`);
                 } else {
                     // Create new record only if no existing records found
                     const newRecord = {
                         url: urlKey,
                         date: new Date(),
-                        phone: phones
+                        phone: phones.slice(0, 3)
                     };
 
-                    socialScrapeLogger.debug(`Creating new record for URL ${urlKey} with phones [${phones.join(', ')}]`);
+                    // socialScrapeLogger.debug(`Creating new record for URL ${urlKey}`);
 
                     await SocialScrape.create(newRecord);
 
                     progressTracker.created++;
-                    await fs.promises.appendFile(logFile, `[${new Date().toISOString()}] Created new record for URL: ${urlKey}, phones: ${phones.join(', ')}\n`);
+                    // await fs.promises.appendFile(logFile, `[${new Date().toISOString()}] Created new record for URL: ${urlKey}\n`);
+                 
                 }
+
+                // Remove the logging from here - it was causing duplicate logs
+                // socialScrapeLogger.info(`Updated URL: ${urlKey}, phone: ${phones.map(p => p.number).join(', ')}`);
+
 
             } catch (error) {
                 const errorMsg = `Error processing URL ${urlKey}: ${error.message}`;
@@ -1327,8 +1293,5 @@ module.exports = {
     IMPORT_DIR,
     BLACKLIST_DIR,
     PHONE_DIR,
-    importEventEmitter,
-    blacklistEventEmitter,
-    phoneEventEmitter,
     phoneProgressStore
 };
