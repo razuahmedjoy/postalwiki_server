@@ -809,7 +809,7 @@ const processPhoneFile = async (filePath, processId) => {
                 socialScrapeLogger.info(`Marked file ${path.basename(filePath)} as completed (timeout). Total completed: ${progressTracker.completedFiles}/${progressTracker.totalFiles}`);
                 // phoneEventEmitter.emit('progress', { processId, ...progressTracker });
                 reject(new Error(errorMsg));
-            }, 60 * 60 * 1000); // 1 hour timeout
+            }, 30 * 60 * 1000); // 30 minutes timeout
 
             const parser = csv.parse({
                 columns: false, // No headers
