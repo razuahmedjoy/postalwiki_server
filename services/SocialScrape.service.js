@@ -7,7 +7,7 @@ const SocialScrape = require('../models/SocialScrape');
 const socialScrapeLogger = require('../config/socialScrapeLogger');
 const { isValidDomain } = require('../utils/helpers');
 const { archiveFile } = require('../utils/fileUtils');
-const { areaCodes } = require('../utils/areaCodes');
+const areaCodes = require('../utils/areaCodes');
 
 // Reduced batch size and parallel processing for 4GB RAM, 2-core VPS
 const BATCH_SIZE = 2000; // Reduced from 50000 to 1000 for better reliability

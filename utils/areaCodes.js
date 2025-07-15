@@ -764,7 +764,7 @@
 // 09	Premium Rate
 
 
-export const areaCodes = [
+const areaCodes = [
     { code: "0113", areaName: "Leeds" },
     { code: "0114", areaName: "Sheffield" },
     { code: "0115", areaName: "Nottingham" },
@@ -1530,3 +1530,5 @@ export const areaCodes = [
     { code: "087", areaName: "Premium Rate" },
     { code: "09", areaName: "Premium Rate" }
 ];
+
+module.exports = areaCodes;
