@@ -1523,7 +1523,7 @@ const areaCodes = [
     { code: "0500", areaName: "non geographic" },
     { code: "07", areaName: "Mobile" },
     { code: "070", areaName: "Mobile" },
-    { code: "08", areaName: "Freephone" },
+    // { code: "08", areaName: "Freephone" },
     { code: "0800", areaName: "Freephone" },
     { code: "0808", areaName: "Freephone" },
     { code: "084", areaName: "Premium Rate" },

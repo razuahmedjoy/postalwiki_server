@@ -2,6 +2,7 @@ const User = require('../models/User');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { registerSchema, loginSchema } = require('../validations/authValidation');
+const { ROLES } = require('../utils/constants');
 
 exports.register = async (req, res) => {
     try {
@@ -13,7 +14,7 @@ exports.register = async (req, res) => {
         const user = new User({
             username: validated.username,
             password: hashedPassword,
-            role: 'user',
+            role: ROLES.USER,
         });
         await user.save();
         res.status(201).json({ message: 'User registered successfully' });
