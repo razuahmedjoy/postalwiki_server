@@ -14,7 +14,6 @@ const botsolSchema = new mongoose.Schema({
     areaName: String
   }],
   address: String,
-  postcode: String,
   facebook: String,
   youtube: String,
   instagram: String,
@@ -27,8 +26,8 @@ const botsolSchema = new mongoose.Schema({
 
 }, { timestamps: true, collection: 'botsol', strict: false });
 
-// Add compound unique index on URL + date to allow multiple records with same URL but different dates
-botsolSchema.index({ url: 1, date: 1 }, { unique: true, background: true });
+// Add compound index on company_name + postcode for fast lookups
+botsolSchema.index({ company_name: 1, postcode: 1 }, { background: true });
 
 // Add index on date for sorting
 botsolSchema.index({ date: -1 }, { background: true });

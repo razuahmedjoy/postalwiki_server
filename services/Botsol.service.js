@@ -76,8 +76,6 @@ const isValidDomain = (domain) => {
     return domainRegex.test(domain) && domain.length > 0 && domain.length <= 253;
 };
 
-
-
 // Phone utilities
 const cleanPhoneNumber = (phone) => {
     if (!phone || typeof phone !== 'string') return null;
@@ -131,6 +129,13 @@ const isValidPhoneNumber = (phone, url) => {
     return cleanedPhone ? cleanedPhone : false;
 };
 
+// Check if date is within 90 days
+const isWithin90Days = (existingDate, newDate) => {
+    const diffTime = Math.abs(newDate - existingDate);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays <= 90;
+};
+
 // Process record
 const processRecord = (record) => {
     try {
@@ -156,23 +161,41 @@ const processRecord = (record) => {
                 .substring(0, 400);
         };
 
+        // Get company name and postcode first
+        const companyName = cleanText(record.Name);
+        if (!companyName) {
+            botsolLogger.debug(`Skipping record with no company name`);
+            return null;
+        }
+
+        // Extract postcode from address
+        let postcode = '';
+        const address = cleanText(record.Full_Address);
+        if (address) {
+            const postcodeMatch = address.match(/[A-Z]{1,2}[0-9][A-Z0-9]? ?[0-9][A-Z]{2}/i);
+            if (postcodeMatch) {
+                postcode = postcodeMatch[0].toUpperCase();
+            }
+        }
+
+        if (!postcode) {
+            botsolLogger.debug(`Skipping record with no postcode for company: ${companyName}`);
+            return null;
+        }
+
         // Get URL from Website or URL column
         let url = record?.Website;
         // if url is found, trim it to only include the domain name 
         if (url) {
             url = trimUrl(url);
         }
-        botsolLogger.info(`Processing URL: ${url}`);
-        if (!isValidDomain(url)) {
-            console.debug(`Skipping invalid domain: ${url}`);
-            return null;
-        }
 
         const processedRecord = {
-            url: trimUrl(url),
+            company_name: companyName,
+            postcode: postcode,
+            url: url || '',
             date: new Date(),
-            company_name: cleanText(record.Name),
-            address: cleanText(record.Full_Address),
+            address: address,
             email: cleanText(record.Email),
             facebook: cleanSocialUrl(record.Facebook),
             twitter: cleanSocialUrl(record.Twitter),
@@ -195,14 +218,6 @@ const processRecord = (record) => {
             }
         }
 
-        // Extract postcode from address
-        if (processedRecord.address) {
-            const postcodeMatch = processedRecord.address.match(/[A-Z]{1,2}[0-9][A-Z0-9]? ?[0-9][A-Z]{2}/i);
-            if (postcodeMatch) {
-                processedRecord.postcode = postcodeMatch[0].toUpperCase();
-            }
-        }
-
         return processedRecord;
     } catch (error) {
         console.error(`Error processing record: ${error.message}`);
@@ -210,31 +225,106 @@ const processRecord = (record) => {
     }
 };
 
-// Batch processing
+// Batch processing with optimized memory usage
 const insertBatch = async (batch, filename, processed) => {
     try {
-        const operations = batch.map(doc => ({
-            updateOne: {
-                filter: { url: doc.url, date: doc.date },
-                update: { $set: doc },
-                upsert: true
+        let upserted = 0;
+        let modified = 0;
+
+        // Deduplicate within the batch first (small memory footprint)
+        const uniqueRecords = new Map();
+        for (const doc of batch) {
+            const key = `${doc.company_name}_${doc.postcode}`;
+            if (!uniqueRecords.has(key)) {
+                uniqueRecords.set(key, doc);
+            } else {
+                // If we have multiple records with same company+postcode in batch, 
+                // keep the one with the most recent date
+                const existing = uniqueRecords.get(key);
+                if (doc.date > existing.date) {
+                    uniqueRecords.set(key, doc);
+                }
             }
-        }));
+        }
 
-        const result = await Botsol.bulkWrite(operations, {
-            ordered: false,
-            writeConcern: { w: 1 },
-            bypassDocumentValidation: true
-        });
+        // Process unique records with proper database synchronization
+        for (const doc of uniqueRecords.values()) {
+            try {
+                // First check if record exists
+                const existingRecord = await Botsol.findOne({
+                    company_name: doc.company_name,
+                    postcode: doc.postcode
+                });
 
-        importProgressTracker.upserted += result.upsertedCount;
-        importProgressTracker.modified += result.modifiedCount;
+                if (existingRecord) {
+                    // Update existing record
+                    const updateData = {};
+                    
+                    // Only update fields that have values
+                    if (doc.url) updateData.url = doc.url;
+                    if (doc.address) updateData.address = doc.address;
+                    if (doc.email) updateData.email = doc.email;
+                    if (doc.facebook) updateData.facebook = doc.facebook;
+                    if (doc.twitter) updateData.twitter = doc.twitter;
+                    if (doc.instagram) updateData.instagram = doc.instagram;
+                    if (doc.meta_description) updateData.meta_description = doc.meta_description;
+                    
+                    // Merge phone arrays
+                    if (doc.phone && doc.phone.length > 0) {
+                        const existingPhones = existingRecord.phone || [];
+                        const newPhones = doc.phone;
+                        const mergedPhones = [...existingPhones];
+                        
+                        for (const newPhone of newPhones) {
+                            const exists = mergedPhones.some(existing => 
+                                existing.number === newPhone.number && existing.areaName === newPhone.areaName
+                            );
+                            if (!exists) {
+                                mergedPhones.push(newPhone);
+                            }
+                        }
+                        updateData.phone = mergedPhones;
+                    }
+
+                    if (Object.keys(updateData).length > 0) {
+                        await Botsol.updateOne(
+                            { _id: existingRecord._id },
+                            { $set: updateData },
+                            { writeConcern: { w: 1, j: true } }
+                        );
+                        modified++;
+                    }
+                } else {
+                    // Create new record
+                    await Botsol.create(doc);
+                    upserted++;
+                }
+                
+                // Reduced delay for better performance
+                await new Promise(resolve => setTimeout(resolve, 10));
+                
+            } catch (error) {
+                botsolLogger.error(`Error processing individual record: ${error.message}`);
+                importProgressTracker.errors.push({
+                    filename,
+                    error: `Failed to process record for ${doc.company_name}: ${error.message}`
+                });
+            }
+        }
+
+        importProgressTracker.upserted += upserted;
+        importProgressTracker.modified += modified;
         importProgressTracker.processed = processed;
+
+        // Log batch summary only
+        if (upserted > 0 || modified > 0) {
+            botsolLogger.info(`Batch completed: ${upserted} created, ${modified} updated, ${uniqueRecords.size} total records processed`);
+        }
 
         return {
             success: true,
-            upserted: result.upsertedCount,
-            modified: result.modifiedCount
+            upserted: upserted,
+            modified: modified
         };
     } catch (error) {
         console.error(`Error in insertBatch: ${error.message}`);
@@ -250,12 +340,12 @@ const processBatchesInParallel = async (batches, filename, processed) => {
     try {
         let results = { upserted: 0, modified: 0 };
 
+        // Process batches sequentially to prevent race conditions
         for (const batch of batches) {
-            const result = await insertBatch(batch, filename, processed, null);
+            const result = await insertBatch(batch, filename, processed);
             results.upserted += result.upserted;
             results.modified += result.modified;
-            botsolLogger.info(`Processed ${results.upserted} upserts and ${results.modified} modifications`);
-            await new Promise(resolve => setTimeout(resolve, 100));
+            await new Promise(resolve => setTimeout(resolve, 50));
         }
 
         return results;
@@ -305,7 +395,6 @@ const processFile = async (filePath) => {
             let record;
             while ((record = parser.read()) !== null) {
                 try {
-            
                     const processedRecord = processRecord(record);
                     if (processedRecord) {
                         // Use file creation date if available
