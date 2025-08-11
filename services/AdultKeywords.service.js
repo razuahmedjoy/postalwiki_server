@@ -283,7 +283,8 @@ const processMergedRecord = async (mergedRecord) => {
                 source: titleExact ? 'title' : descExact ? 'meta_description' : 'keywords'
             });
             
-            const result = await updateSocialScrapeRecord(url, exactKeyword);
+            // const result = await updateSocialScrapeRecord(url, exactKeyword);
+            const result = { updated: true, record: null };
             return { 
                 type: 'exact', 
                 keyword: exactKeyword, 
@@ -348,9 +349,11 @@ const updateSocialScrapeRecord = async (url, matchedKeyword) => {
                 $set: {
                     title: "Possible 18+ content – text / image removed",
                     meta_description: "Possible 18+ content – text / image removed",
+                    is_adult_content: true
                 }
             }
         );
+  
 
         if (updateResult.modifiedCount > 0) {
             // adultKeywordsLogger.info('Successfully updated social scrape record', {

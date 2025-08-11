@@ -22,6 +22,7 @@ const socialScrapeSchema = new mongoose.Schema({
   redirect_url: String,
   meta_description: String,
   is_blacklisted: { type: Boolean, default: false },
+  is_adult_content: { type: Boolean, default: false },
 
 }, { timestamps: true, collection: 'socialscrapes', strict: false });
 
