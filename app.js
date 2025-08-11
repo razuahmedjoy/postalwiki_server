@@ -9,6 +9,7 @@ const { verifyToken } = require('./middlewares/authmiddleware');
 const { authorizeRoles } = require('./middlewares/rolemiddleware');
 const { getCollectionStats } = require('./controllers/collectionController');
 const socialScrapeRoutes = require('./routes/socialScrapeRoutes');
+const adultKeywordsRoutes = require('./routes/adultKeywordsRoutes');
 const app = express();
 
 // Body parser - Move this before security middleware
@@ -50,6 +51,7 @@ app.get('/api/stats',verifyToken, authorizeRoles('admin'), getCollectionStats);
 app.use('/api/ss-url', verifyToken, authorizeRoles('admin'), ssUrlRoutes);
 app.use('/api/social-scrape', verifyToken, authorizeRoles('admin'), socialScrapeRoutes);
 app.use('/api/botsol', verifyToken, authorizeRoles('admin'), botsolRoutes);
+app.use('/api/adult-keywords', verifyToken, authorizeRoles('admin'), adultKeywordsRoutes);
 
 // ✅ admin-only route example
 app.get('/admin', verifyToken, authorizeRoles('admin'), (req, res) => {
