@@ -147,6 +147,32 @@ const bulkProcessReferences = async (req, res) => {
     }
 };
 
+// Get memory status
+const getMemoryStatus = async (req, res) => {
+    try {
+        const memUsage = process.memoryUsage();
+        const memoryStatus = {
+            heapUsed: Math.round(memUsage.heapUsed / 1024 / 1024), // MB
+            heapTotal: Math.round(memUsage.heapTotal / 1024 / 1024), // MB
+            external: Math.round(memUsage.external / 1024 / 1024), // MB
+            rss: Math.round(memUsage.rss / 1024 / 1024), // MB
+            memoryUsagePercent: Math.round((memUsage.heapUsed / memUsage.heapTotal) * 100),
+            timestamp: new Date().toISOString()
+        };
+        
+        res.json({
+            success: true,
+            memoryStatus
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Failed to get memory status',
+            error: error.message
+        });
+    }
+};
+
 module.exports = {
     AdultKeywordsController: {
         startMatching,
@@ -155,6 +181,7 @@ module.exports = {
         getStats,
         getReferences,
         getPaginatedReferences,
-        bulkProcessReferences
+        bulkProcessReferences,
+        getMemoryStatus
     }
 }; 

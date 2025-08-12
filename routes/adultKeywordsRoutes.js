@@ -7,7 +7,10 @@ const router = express.Router();
 // Public routes (no auth required)
 router.get('/matching-progress', AdultKeywordsController.getMatchingProgress);
 
-// Protected routes (auth required)
+// Memory monitoring endpoint (public)
+router.get('/memory-status', AdultKeywordsController.getMemoryStatus);
+
+// Protected admin routes
 router.post('/start-matching', AdultKeywordsController.startMatching);
 router.post('/stop-matching', AdultKeywordsController.stopMatching);
 

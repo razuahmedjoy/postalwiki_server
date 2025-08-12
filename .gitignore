@@ -24,3 +24,9 @@ imports/social_scrape/completed_*
 imports/social_scrape_blacklisted/completed_*
 imports/social_scrape_phone/completed_*
 imports/*/completed_*
+
+update/
+update/*
+update/*/completed_*
+update/*/*
+
