@@ -112,6 +112,41 @@ const getPaginatedReferences = async (req, res) => {
     }
 };
 
+const bulkProcessReferences = async (req, res) => {
+    try {
+        const { recordIds, isAdultContent } = req.body;
+        
+        if (!recordIds || !Array.isArray(recordIds) || recordIds.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'Record IDs array is required'
+            });
+        }
+        
+        if (typeof isAdultContent !== 'boolean') {
+            return res.status(400).json({
+                success: false,
+                error: 'isAdultContent boolean flag is required'
+            });
+        }
+        
+        const result = await AdultKeywordsService.bulkProcessReferences(recordIds, isAdultContent);
+        
+        res.json({
+            success: true,
+            message: result.message,
+            processed: result.processed,
+            updated: result.updated
+        });
+    } catch (error) {
+        socialScrapeLogger.error('Error in bulkProcessReferences controller:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
+    }
+};
+
 module.exports = {
     AdultKeywordsController: {
         startMatching,
@@ -119,6 +154,7 @@ module.exports = {
         getMatchingProgress,
         getStats,
         getReferences,
-        getPaginatedReferences
+        getPaginatedReferences,
+        bulkProcessReferences
     }
 }; 

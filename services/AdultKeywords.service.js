@@ -68,15 +68,15 @@ const getMatchingFiles = async () => {
 const moveCompletedFile = async (filePath) => {
     try {
         const filename = path.basename(filePath);
-        // const today = new Date().toISOString().split('T')[0];
-        // const completedDir = path.join(MATCH_DIR, `completed_${today}`);
+        const today = new Date().toISOString().split('T')[0];
+        const completedDir = path.join(MATCH_DIR, `completed_${today}`);
 
-        // // Create completed directory if it doesn't exist
-        // await fs.promises.mkdir(completedDir, { recursive: true });
+        // Create completed directory if it doesn't exist
+        await fs.promises.mkdir(completedDir, { recursive: true });
 
-        // // Move the file
-        // const newPath = path.join(completedDir, filename);
-        // await fs.promises.rename(filePath, newPath);
+        // Move the file
+        const newPath = path.join(completedDir, filename);
+        await fs.promises.rename(filePath, newPath);
 
         adultKeywordsLogger.info(`Moved file ${filename} to completed directory`);
     } catch (error) {
@@ -258,12 +258,12 @@ const processMergedRecord = async (mergedRecord) => {
         }
 
         // First, check if the record exists in social scrape database
-        // const existingSocialScrapeRecord = await SocialScrape.findOne({ url: url });
+        const existingSocialScrapeRecord = await SocialScrape.findOne({ url: url });
         
-        // if (!existingSocialScrapeRecord) {
+        if (!existingSocialScrapeRecord) {
      
-        //     return { type: 'no_social_scrape_record', url };
-        // }
+            return { type: 'no_social_scrape_record', url };
+        }
 
         // Check for exact matches first (only if record exists in social scrape)
         const titleExact = checkExactMatch(title);
@@ -283,8 +283,8 @@ const processMergedRecord = async (mergedRecord) => {
                 source: titleExact ? 'title' : descExact ? 'meta_description' : 'keywords'
             });
             
-            // const result = await updateSocialScrapeRecord(url, exactKeyword);
-            const result = { updated: true, record: null };
+            const result = await updateSocialScrapeRecord(url, exactKeyword);
+
             return { 
                 type: 'exact', 
                 keyword: exactKeyword, 
@@ -383,56 +383,107 @@ const updateSocialScrapeRecord = async (url, matchedKeyword) => {
 const createAdultKeywordsReference = async (url, title, meta_description, keywords, matchedKeywords, csvSource) => {
     try {
         // Additional safety check: ensure URL exists in social scrape database
-        const existingSocialScrapeRecord = await SocialScrape.findOne({ url: url });
+        const existingSocialScrapeRecord = await SocialScrape.findOne({ url: url, $or: [{ is_adult_content: false }, { is_adult_content: { $exists: false } }] });
         if (!existingSocialScrapeRecord) {
             // adultKeywordsLogger.warn(`Attempted to create reference for URL not in social scrape database: ${url}`);
             return { created: false, updated: false, error: 'URL not found in social scrape database' };
+        }
+
+        // Determine which properties had contains matches
+        const titleContains = checkContainsMatch(title);
+        const descContains = checkContainsMatch(meta_description);
+        const keywordsContains = checkContainsMatch(keywords);
+
+        // Only store properties that had matches
+        const referenceData = {
+            url,
+            matched_keywords: matchedKeywords,
+            match_type: 'contains',
+            csv_source: csvSource
+        };
+
+        // Add title only if it had contains matches
+        if (titleContains.length > 0) {
+            referenceData.title = title;
+        }
+
+        // Add meta_description only if it had contains matches
+        if (descContains.length > 0) {
+            referenceData.meta_description = meta_description;
+        }
+
+        // Add keywords only if it had contains matches
+        if (keywordsContains.length > 0) {
+            referenceData.keywords = keywords;
         }
 
         // Check if reference already exists
         const existingReference = await AdultKeywordsReference.findOne({ url });
         
         if (existingReference) {
-            // Update existing reference with new matched keywords
+            // Update existing reference with new matched keywords and properties
             const updatedKeywords = [...new Set([...existingReference.matched_keywords, ...matchedKeywords])];
+            
+            // Merge properties - keep existing ones and add new ones that had matches
+            const updateData = { 
+                matched_keywords: updatedKeywords,
+                updated_at: new Date()
+            };
+
+            // Update title if we have a new title match
+            if (titleContains.length > 0) {
+                updateData.title = title;
+            }
+
+            // Update meta_description if we have a new description match
+            if (descContains.length > 0) {
+                updateData.meta_description = meta_description;
+            }
+
+            // Update keywords if we have a new keywords match
+            if (keywordsContains.length > 0) {
+                updateData.keywords = keywords;
+            }
+
             await AdultKeywordsReference.updateOne(
                 { url },
-                { 
-                    $set: { 
-                        matched_keywords: updatedKeywords,
-                        updated_at: new Date()
-                    }
-                }
+                { $set: updateData }
             );
+            
+            // Log which properties had matches
+            const matchedProperties = [];
+            if (titleContains.length > 0) matchedProperties.push('title');
+            if (descContains.length > 0) matchedProperties.push('meta_description');
+            if (keywordsContains.length > 0) matchedProperties.push('keywords');
             
             // adultKeywordsLogger.info('Updated existing adult keywords reference', {
             //     url,
             //     keywords: matchedKeywords,
             //     matchType: 'contains',
             //     action: 'reference_updated',
-            //     totalKeywords: updatedKeywords.length
+            //     totalKeywords: updatedKeywords.length,
+            //     matchedProperties: matchedProperties
             // });
             
             return { created: false, updated: true };
         } else {
-            // Create new reference
-            const reference = new AdultKeywordsReference({
-                url,
-                title,
-                meta_description,
-                keywords,
-                matched_keywords: matchedKeywords,
-                match_type: 'contains',
-                csv_source: csvSource
-            });
+            // Create new reference with only the properties that had matches
+            const reference = new AdultKeywordsReference(referenceData);
             await reference.save();
+            
+            // Log which properties had matches
+            const matchedProperties = [];
+            if (titleContains.length > 0) matchedProperties.push('title');
+            if (descContains.length > 0) matchedProperties.push('meta_description');
+            if (keywordsContains.length > 0) matchedProperties.push('keywords');
             
             // adultKeywordsLogger.info('Created new adult keywords reference', {
             //     url,
             //     keywords: matchedKeywords,
             //     matchType: 'contains',
             //     action: 'reference_created',
-            //     csvSource
+            //     csvSource,
+            //     matchedProperties: matchedProperties
             // });
             
             return { created: true, updated: false };
@@ -784,6 +835,96 @@ const getPaginatedReferences = async (page = 1, limit = 50, matchType = null, pr
     }
 };
 
+// Bulk process references
+const bulkProcessReferences = async (recordIds, isAdultContent) => {
+    try {
+        adultKeywordsLogger.info('Starting bulk process for references', {
+            action: 'bulk_process_started',
+            recordCount: recordIds.length,
+            isAdultContent: isAdultContent
+        });
+
+        let processed = 0;
+        let updated = 0;
+
+        // Get all references by IDs
+        const references = await AdultKeywordsReference.find({ _id: { $in: recordIds } });
+        
+        if (references.length === 0) {
+            throw new Error('No references found with the provided IDs');
+        }
+
+        // Process each reference
+        for (const reference of references) {
+            try {
+                if (isAdultContent) {
+                    // Mark as adult content - update social scrape record
+                    const updateResult = await SocialScrape.updateMany(
+                        { url: reference.url },
+                        {
+                            $set: {
+                                title: "Possible 18+ content – text / image removed",
+                                meta_description: "Possible 18+ content – text / image removed",
+                                is_adult_content: true
+                            }
+                        }
+                    );
+
+                    if (updateResult.modifiedCount > 0) {
+                        updated++;
+                        adultKeywordsLogger.info('Updated social scrape record for adult content', {
+                            url: reference.url,
+                            action: 'social_scrape_updated',
+                            isAdultContent: true
+                        });
+                    }
+                }
+
+                // Mark reference as processed
+                await AdultKeywordsReference.updateOne(
+                    { _id: reference._id },
+                    { 
+                        $set: { 
+                            processed: true,
+                            processed_at: new Date(),
+                            updated_at: new Date()
+                        }
+                    }
+                );
+
+                processed++;
+                adultKeywordsLogger.info('Marked reference as processed', {
+                    url: reference.url,
+                    action: 'reference_processed',
+                    isAdultContent: isAdultContent
+                });
+
+            } catch (error) {
+                adultKeywordsLogger.error(`Error processing reference ${reference._id}:`, error);
+                // Continue with other records
+            }
+        }
+
+        adultKeywordsLogger.info('Completed bulk process for references', {
+            action: 'bulk_process_completed',
+            totalRecords: recordIds.length,
+            processed: processed,
+            updated: updated,
+            isAdultContent: isAdultContent
+        });
+
+        return {
+            message: `Successfully processed ${processed} references${isAdultContent ? ` and updated ${updated} social scrape records` : ''}`,
+            processed: processed,
+            updated: updated
+        };
+
+    } catch (error) {
+        adultKeywordsLogger.error('Error in bulk process references:', error);
+        throw error;
+    }
+};
+
 module.exports = {
     AdultKeywordsService: {
         startMatching,
@@ -791,7 +932,8 @@ module.exports = {
         getMatchingProgress,
         getStats,
         getReferences,
-        getPaginatedReferences
+        getPaginatedReferences,
+        bulkProcessReferences
     },
     matchingProgressTracker,
     resetMatchingProgress,
