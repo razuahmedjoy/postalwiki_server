@@ -173,6 +173,24 @@ const getMemoryStatus = async (req, res) => {
     }
 };
 
+// Get completed files statistics
+const getCompletedFilesStats = async (req, res) => {
+    try {
+        const stats = await AdultKeywordsService.getCompletedFilesStats();
+        
+        res.json({
+            success: true,
+            stats: stats
+        });
+    } catch (error) {
+        socialScrapeLogger.error('Error in getCompletedFilesStats controller:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
+    }
+};
+
 module.exports = {
     AdultKeywordsController: {
         startMatching,
@@ -182,6 +200,7 @@ module.exports = {
         getReferences,
         getPaginatedReferences,
         bulkProcessReferences,
-        getMemoryStatus
+        getMemoryStatus,
+        getCompletedFilesStats
     }
 }; 

@@ -37,6 +37,94 @@ const clearCurrentFileTracking = () => {
     currentFileContainsMatches = 0;
 };
 
+// Move completed file to completed_date folder
+const moveCompletedFile = async (filePath, filename) => {
+    try {
+        const completedDir = path.join(MATCH_DIR, 'completed_' + new Date().toISOString().split('T')[0]);
+        
+        // Create completed directory if it doesn't exist
+        await fs.promises.mkdir(completedDir, { recursive: true });
+        
+        const sourcePath = filePath;
+        const destinationPath = path.join(completedDir, filename);
+        
+        // Move the file
+        await fs.promises.rename(sourcePath, destinationPath);
+        
+        adultKeywordsLogger.info(`Moved completed file ${filename} to ${completedDir}`);
+        
+    } catch (error) {
+        adultKeywordsLogger.error(`Error moving completed file ${filename}:`, error);
+        // Don't throw error - file processing was successful, just couldn't move it
+    }
+};
+
+// Clean up old completed folders (keep only last 7 days)
+const cleanupOldCompletedFolders = async () => {
+    try {
+        const matchDir = await fs.promises.readdir(MATCH_DIR);
+        const completedFolders = matchDir.filter(item => 
+            item.startsWith('completed_') && 
+            fs.statSync(path.join(MATCH_DIR, item)).isDirectory()
+        );
+        
+        if (completedFolders.length > 7) {
+            // Sort by date (oldest first) and remove oldest ones
+            const sortedFolders = completedFolders.sort();
+            const foldersToRemove = sortedFolders.slice(0, completedFolders.length - 7);
+            
+            for (const folder of foldersToRemove) {
+                const folderPath = path.join(MATCH_DIR, folder);
+                await fs.promises.rm(folderPath, { recursive: true, force: true });
+                adultKeywordsLogger.info(`Cleaned up old completed folder: ${folder}`);
+            }
+        }
+    } catch (error) {
+        adultKeywordsLogger.error('Error cleaning up old completed folders:', error);
+        // Don't throw error - this is cleanup, not critical
+    }
+};
+
+// Get completed files statistics
+const getCompletedFilesStats = async () => {
+    try {
+        const matchDir = await fs.promises.readdir(MATCH_DIR);
+        const completedFolders = matchDir.filter(item => 
+            item.startsWith('completed_') && 
+            fs.statSync(path.join(MATCH_DIR, item)).isDirectory()
+        );
+        
+        let totalCompletedFiles = 0;
+        const folderStats = [];
+        
+        for (const folder of completedFolders) {
+            const folderPath = path.join(MATCH_DIR, folder);
+            const files = await fs.promises.readdir(folderPath);
+            const csvFiles = files.filter(file => file.endsWith('.csv'));
+            totalCompletedFiles += csvFiles.length;
+            
+            folderStats.push({
+                folder,
+                fileCount: csvFiles.length,
+                files: csvFiles
+            });
+        }
+        
+        return {
+            totalCompletedFolders: completedFolders.length,
+            totalCompletedFiles,
+            folderStats
+        };
+    } catch (error) {
+        adultKeywordsLogger.error('Error getting completed files stats:', error);
+        return {
+            totalCompletedFolders: 0,
+            totalCompletedFiles: 0,
+            folderStats: []
+        };
+    }
+};
+
 // Utility Functions
 const ensureMatchDirectory = async () => {
     try {
@@ -515,6 +603,9 @@ const processFile = async (filePath) => {
                     
                     adultKeywordsLogger.info(`Completed: ${filename} - ${processed} records, ${skippedLines} skipped, ${uniqueExactMatches} unique exact matches, ${uniqueContainsMatches} unique contains matches`);
 
+                    // Move completed file to completed_date folder
+                    await moveCompletedFile(filePath, filename);
+
                     resolve({ filename, processed });
                 } catch (error) {
                     clearTimeout(processingTimeout);
@@ -555,6 +646,9 @@ const startMatching = async () => {
         if (files.length === 0) {
             throw new Error('No CSV files found in match_adult_keywords directory');
         }
+
+        // Clean up old completed folders before starting
+        await cleanupOldCompletedFolders();
 
         resetMatchingProgress();
         setMatchingRunning(true);
@@ -814,7 +908,8 @@ module.exports = {
         getStats,
         getReferences,
         getPaginatedReferences,
-        bulkProcessReferences
+        bulkProcessReferences,
+        getCompletedFilesStats // Added new function to exports
     },
     matchingProgressTracker,
     resetMatchingProgress,
