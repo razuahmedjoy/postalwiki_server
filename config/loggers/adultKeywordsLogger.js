@@ -73,6 +73,19 @@ const adultKeywordsLogger = winston.createLogger({
             }
         }),
         
+        // Main log file (all levels except error)
+        new winston.transports.File({
+            filename: path.join(logsDir, 'adult-keywords-debug.log'),
+            level: 'debug',
+            maxsize: 50 * 1024 * 1024, // 50MB
+            maxFiles: 10, // Keep 10 files
+            tailable: true,
+            // Auto-delete files older than 10 days
+            options: {
+                flags: 'a'
+            }
+        }),
+        
         // Error log file (only errors)
         new winston.transports.File({
             filename: path.join(logsDir, 'error-adult-keywords.log'),

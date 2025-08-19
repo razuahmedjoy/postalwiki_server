@@ -1198,7 +1198,7 @@ const SocialScrapeService = {
     updateProgressTracker
 };
 
-// Start periodic cleanup of old progress trackers (every 6 hours)
+
 setInterval(() => {
     cleanupOldProgressTrackers();
 }, 6 * 60 * 60 * 1000); // 6 hours

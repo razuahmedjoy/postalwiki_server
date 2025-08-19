@@ -12,7 +12,7 @@ const startMatching = async (req, res) => {
             files: result.files
         });
     } catch (error) {
-        socialScrapeLogger.error('Error in startMatching controller:', error);
+        socialScrapeLogger.error('Error in start Matching controller:', error);
         res.status(500).json({ 
             success: false, 
             error: error.message 
