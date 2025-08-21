@@ -601,14 +601,50 @@ const processBlacklistFile = async (filePath, urlColumn, processId) => {
                     continue;
                 }
 
-                // Create a new document with default values
+                // Parse date from the 0 column (first column) - extract only date, ignore time
+                let parsedDate = new Date(); // Default to current date
+                if (columns[0] && columns[0].trim()) {
+                    try {
+                        const dateStr = columns[0].trim();
+                        
+                        // Extract only the date part (before any space)
+                        const dateOnly = dateStr.split(' ')[0];
+                        
+                        // Handle date formats: "03/08/2025" or "03-08-2025"
+                        const parts = dateOnly.includes('-') ? dateOnly.split('-') : dateOnly.split('/');
+                        if (parts.length === 3) {
+                            // Convert to YYYY-MM-DD format for proper Date parsing
+                            const isoDate = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+                            parsedDate = new Date(isoDate);
+                            
+                            // Validate the parsed date
+                            if (isNaN(parsedDate.getTime())) {
+                                await fs.promises.appendFile(logFile, `[${new Date().toISOString()}] Invalid date format in column 0: "${dateStr}", using current date\n`);
+                             
+                                parsedDate = new Date();
+                            }
+                        } else {
+                            await fs.promises.appendFile(logFile, `[${new Date().toISOString()}] Invalid date format in column 0: "${dateStr}", using current date\n`);
+                            parsedDate = new Date();
+                        }
+                    } catch (dateError) {
+                        await fs.promises.appendFile(logFile, `[${new Date().toISOString()}] Error parsing date from column 0: "${columns[0]}", using current date. Error: ${dateError.message}\n`);
+                        parsedDate = new Date();
+                    }
+                }
+
+                // Create a new document with the parsed date
                 const defaultDoc = {
                     url,
-                    date: new Date()
+                    date: parsedDate
                 };
 
+                // Search by both URL and date for more precise matching
                 const result = await SocialScrape.findOneAndUpdate(
-                    { url },
+                    { 
+                        url: url,
+                        date: parsedDate
+                    },
                     {
                         $set: {
                             is_blacklisted: true
@@ -622,12 +658,13 @@ const processBlacklistFile = async (filePath, urlColumn, processId) => {
                     }
                 );
 
+
                 if (result.isNew) {
                     progressTracker.upserted++;
-                    await fs.promises.appendFile(logFile, `[${new Date().toISOString()}] Inserted new record for URL: ${url}\n`);
+                    await fs.promises.appendFile(logFile, `[${new Date().toISOString()}] Inserted new record for URL: ${url} with date: ${parsedDate.toISOString().split('T')[0]}\n`);
                 } else if (result.isModified('is_blacklisted')) {
                     progressTracker.modified++;
-                    await fs.promises.appendFile(logFile, `[${new Date().toISOString()}] Updated blacklist status for URL: ${url}\n`);
+                    await fs.promises.appendFile(logFile, `[${new Date().toISOString()}] Updated blacklist status for URL: ${url} with date: ${parsedDate.toISOString().split('T')[0]}\n`);
                 }
 
                 progressTracker.processed++;

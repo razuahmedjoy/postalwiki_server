@@ -132,6 +132,15 @@ const getStats = async (req, res) => {
     }
 };
 
+const getBlacklistedCount = async (req,res) => {
+    try {
+        const count = await SocialScrape.countDocuments({ is_blacklisted: true });
+        res.json({ success: true, count });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
 const getImportProgress = async (req, res) => {
     try {
         const progress = SocialScrapeService.getImportProgress();
@@ -580,11 +589,13 @@ const SocialScrapeController = {
     getBlacklistProgress,
     getPhoneProgress,
     getPaginatedSocialScrapes,
+    getBlacklistedCount,
     updateBlacklist,
     getProgress,
     updatePhoneNumber,
     stopPhoneProcessing,
     stopImport,
+
 };
 
 module.exports = {

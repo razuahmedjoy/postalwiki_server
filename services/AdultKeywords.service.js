@@ -377,12 +377,12 @@ const processBatch = async (records, filename) => {
                     updateOne: {
                         filter: { url: url },
                         update: {
-                            $set: {
-                                title: "Possible 18+ content – text / image removed",
-                                meta_description: "Possible 18+ content – text / image removed",
-                                is_adult_content: true
-                            }
-                        }
+                $set: {
+                    title: "Possible 18+ content – text / image removed",
+                    meta_description: "Possible 18+ content – text / image removed",
+                    is_adult_content: true
+                }
+            }
                     }
                 });
                 
@@ -390,9 +390,9 @@ const processBatch = async (records, filename) => {
                 matchingProgressTracker.updatedRecords++;
             } else {
                 // Check for contains matches
-                const titleContains = checkContainsMatch(title);
-                const descContains = checkContainsMatch(meta_description);
-                const keywordsContains = checkContainsMatch(keywords);
+        const titleContains = checkContainsMatch(title);
+        const descContains = checkContainsMatch(meta_description);
+        const keywordsContains = checkContainsMatch(keywords);
 
                 if (titleContains.length > 0 || descContains.length > 0 || keywordsContains.length > 0) {
                     const allMatches = [...new Set([...titleContains, ...descContains, ...keywordsContains])];
@@ -404,10 +404,10 @@ const processBatch = async (records, filename) => {
                     }
                     
                     // Create reference data
-                    const referenceData = {
-                        url,
+        const referenceData = {
+            url,
                         matched_keywords: allMatches,
-                        match_type: 'contains',
+            match_type: 'contains',
                         csv_source: filename
                     };
 
@@ -474,7 +474,7 @@ const processBatch = async (records, filename) => {
                 // Fallback to individual operations
                 for (const ref of containsMatchReferences) {
                     try {
-                        await AdultKeywordsReference.updateOne(
+            await AdultKeywordsReference.updateOne(
                             { url: ref.url },
                             { $set: { ...ref, updated_at: new Date() } },
                             { upsert: true }
@@ -570,7 +570,7 @@ const processFile = async (filePath) => {
                                 currentBatch = [];
                             }
                         }
-                    } catch (error) {
+    } catch (error) {
                         skippedLines++;
                         matchingProgressTracker.errors.push({
                             filename,
