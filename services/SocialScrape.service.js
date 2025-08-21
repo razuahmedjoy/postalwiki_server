@@ -91,6 +91,10 @@ const ensureIndexes = async () => {
     try {
         // Create compound unique index on URL + date
         await SocialScrape.collection.createIndex({ url: 1, date: 1 }, { unique: true, background: true });
+        
+        // Create index on is_blacklisted for faster count queries
+        await SocialScrape.collection.createIndex({ is_blacklisted: 1 }, { background: true });
+        
         socialScrapeLogger.info('Indexes created successfully');
     } catch (error) {
         socialScrapeLogger.error('Error creating indexes:', error);
