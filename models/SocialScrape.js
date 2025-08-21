@@ -35,6 +35,8 @@ socialScrapeSchema.index({ date: -1 }, { background: true })
 // Add index on phone.number for fast search
 socialScrapeSchema.index({ 'phone.number': 1 }, { background: true });
 
+socialScrapeSchema.index({ is_blacklisted: 1 }, { background: true });
+
 // Add text index for fast URL search
 socialScrapeSchema.index({ url: 'text' }, { background: true });
 

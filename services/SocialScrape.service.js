@@ -91,10 +91,7 @@ const ensureIndexes = async () => {
     try {
         // Create compound unique index on URL + date
         await SocialScrape.collection.createIndex({ url: 1, date: 1 }, { unique: true, background: true });
-        
-        // Create index on is_blacklisted for faster count queries
-        await SocialScrape.collection.createIndex({ is_blacklisted: 1 }, { background: true });
-        
+
         socialScrapeLogger.info('Indexes created successfully');
     } catch (error) {
         socialScrapeLogger.error('Error creating indexes:', error);
@@ -610,21 +607,21 @@ const processBlacklistFile = async (filePath, urlColumn, processId) => {
                 if (columns[0] && columns[0].trim()) {
                     try {
                         const dateStr = columns[0].trim();
-                        
+
                         // Extract only the date part (before any space)
                         const dateOnly = dateStr.split(' ')[0];
-                        
+
                         // Handle date formats: "03/08/2025" or "03-08-2025"
                         const parts = dateOnly.includes('-') ? dateOnly.split('-') : dateOnly.split('/');
                         if (parts.length === 3) {
                             // Convert to YYYY-MM-DD format for proper Date parsing
                             const isoDate = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
                             parsedDate = new Date(isoDate);
-                            
+
                             // Validate the parsed date
                             if (isNaN(parsedDate.getTime())) {
                                 await fs.promises.appendFile(logFile, `[${new Date().toISOString()}] Invalid date format in column 0: "${dateStr}", using current date\n`);
-                             
+
                                 parsedDate = new Date();
                             }
                         } else {
@@ -645,7 +642,7 @@ const processBlacklistFile = async (filePath, urlColumn, processId) => {
 
                 // Search by both URL and date for more precise matching
                 const result = await SocialScrape.findOneAndUpdate(
-                    { 
+                    {
                         url: url,
                         date: parsedDate
                     },
