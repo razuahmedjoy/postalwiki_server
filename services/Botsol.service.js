@@ -179,7 +179,6 @@ const processRecord = (record) => {
         }
 
         if (!postcode) {
-            botsolLogger.debug(`Skipping record with no postcode for company: ${companyName}`);
             return null;
         }
 
@@ -285,7 +284,6 @@ const insertBatch = async (batch, filename, processed) => {
         for (const [key, doc] of uniqueRecords) {
             // Skip if we've already processed this key in this batch
             if (processedKeys.has(key)) {
-                botsolLogger.warn(`Skipping duplicate key in batch: ${key}`);
                 continue;
             }
             processedKeys.add(key);
@@ -343,7 +341,6 @@ const insertBatch = async (batch, filename, processed) => {
                         }
                     });
                     upserted++;
-                    // botsolLogger.info(`Creating new record for ${doc.company_name} (${doc.postcode}) - existing record was ${Math.ceil(Math.abs(doc.date - existingRecord.date) / (1000 * 60 * 60 * 24))} days old`);
                 }
             } else {
                 // Create new record if no existing record found
@@ -353,7 +350,6 @@ const insertBatch = async (batch, filename, processed) => {
                     }
                 });
                 upserted++;
-                // botsolLogger.info(`Creating new record for ${doc.company_name} (${doc.postcode}) - no existing record found`);
             }
         }
 
@@ -363,11 +359,6 @@ const insertBatch = async (batch, filename, processed) => {
                 ordered: false,
                 writeConcern: { w: 1, j: true }
             });
-
-            // Log batch summary only
-            if (upserted > 0 || modified > 0) {
-                botsolLogger.info(`Batch completed: ${upserted} created, ${modified} updated, ${uniqueRecords.size} total records processed`);
-            }
         }
 
         importProgressTracker.upserted += upserted;
@@ -432,15 +423,9 @@ const processFile = async (filePath) => {
         // Try different date properties in order of preference
         fileDate = stats.birthtime || stats.ctime || stats.mtime || new Date();
         
-        // Log the file date for debugging
-        botsolLogger.info(`File: ${filename}`);
-        botsolLogger.info(`File creation date: ${fileDate}`);
-        botsolLogger.info(`File stats - birthtime: ${stats.birthtime}, ctime: ${stats.ctime}, mtime: ${stats.mtime}`);
-        
         // If we couldn't get a proper creation date, use modification time
         if (!stats.birthtime && stats.mtime) {
             fileDate = stats.mtime;
-            botsolLogger.info(`Using modification time as creation date: ${fileDate}`);
         }
     } catch (error) {
         botsolLogger.warn(`Could not get file creation date for ${filename}, using current date: ${error.message}`);
@@ -502,10 +487,6 @@ const processFile = async (filePath) => {
                             // Use file creation date if available
                             if (fileDate) {
                                 processedRecord.date = fileDate;
-                                // Log first few records to confirm date is set
-                                if (processed < 5) {
-                                    botsolLogger.info(`Record ${processed + 1} date set to: ${processedRecord.date}`);
-                                }
                             }
                             
                             currentBatch.push(processedRecord);
@@ -623,7 +604,6 @@ const processRecordWithHeaders = (record, headers) => {
         }
 
         if (!postcode) {
-            botsolLogger.debug(`Skipping record with no postcode for company: ${companyName}`);
             return null;
         }
 

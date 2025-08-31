@@ -315,7 +315,6 @@ const adultKeywords_contains = [
     "sexy",
     "tit",
     "tits",
-    "trans",
     "transexual",
     "uncensored",
     "webcam",

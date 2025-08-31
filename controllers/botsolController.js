@@ -45,17 +45,11 @@ const startImport = async (req, res) => {
 
 const processFiles = async (files) => {
     try {
-        console.log(`Starting to process ${files.length} files`);
-
         for (let i = 0; i < files.length; i++) {
             const file = files[i];
             try {
-                console.log(`Processing file ${i + 1}/${files.length}: ${file}`);
-
                 const filePath = path.join(IMPORT_DIR, file);
                 await BotsolService.processFile(filePath);
-
-                console.log(`Completed processing file ${i + 1}/${files.length}: ${file}`);
                 
                 // Check if import was marked as complete due to an error
                 const progress = BotsolService.getImportProgress();
@@ -69,7 +63,6 @@ const processFiles = async (files) => {
                     );
                     
                     if (hasFatalErrors) {
-                        console.log(`Import marked as complete with fatal errors, stopping file processing`);
                         break;
                     }
                 }
@@ -92,7 +85,6 @@ const processFiles = async (files) => {
         if (progress) {
             progress.isComplete = true;
             progress.currentFile = null;
-            console.log(`Completed processing all ${files.length} files`);
         }
 
         // Set import as not running
