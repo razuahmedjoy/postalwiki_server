@@ -4,6 +4,8 @@ const jwt = require('jsonwebtoken');
 const { registerSchema, loginSchema } = require('../validations/authValidation');
 const { ROLES } = require('../utils/constants');
 
+
+
 exports.register = async (req, res) => {
     try {
         const validated = registerSchema.parse(req.body);
@@ -28,11 +30,14 @@ exports.register = async (req, res) => {
 
 exports.login = async (req, res) => {
     try {
+
         const validated = loginSchema.parse(req.body);
+        
         const user = await User.findOne({ username: validated.username });
         if (!user) return res.status(400).json({ message: 'Invalid credentials' });
 
         const isMatch = await bcrypt.compare(validated.password, user.password);
+        
         if (!isMatch) return res.status(400).json({ message: 'Invalid credentials' });
 
         const token = jwt.sign(
