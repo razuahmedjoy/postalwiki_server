@@ -148,6 +148,11 @@ const getPaginatedCompanies = async (req, res) => {
         const searchStatus = req.query.searchStatus || '';
         const skip = (page - 1) * limit;
         
+        // Debug logging
+        companyHouseLogger.info('Paginated request:', {
+            page, limit, searchCompany, searchNumber, searchPostcode, searchStatus
+        });
+        
         // Cursor-based pagination parameters
         const cursor = req.query.cursor;
         const useCursorPagination = req.query.useCursor === 'true';
@@ -168,7 +173,9 @@ const getPaginatedCompanies = async (req, res) => {
 
         // Add search filters
         if (searchCompany) {
-            query.$text = { $search: searchCompany };
+            // Use regex search for company name with word boundaries for better matching
+            const escapedSearch = searchCompany.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            query.CompanyName = { $regex: escapedSearch, $options: 'i' };
         }
 
         if (searchNumber) {
@@ -182,6 +189,9 @@ const getPaginatedCompanies = async (req, res) => {
         if (searchStatus) {
             query.CompanyStatus = { $regex: searchStatus, $options: 'i' };
         }
+
+        // Debug the constructed query
+        companyHouseLogger.info('Constructed query:', JSON.stringify(query, null, 2));
 
         let companies;
         let totalCount = 0;
