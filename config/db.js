@@ -3,8 +3,13 @@ const logger = require('./logger.js');
 
 const connectDB = async () => {
     try {
-        // Log connection details (without sensitive info)
+        // Check if MONGO_URI is defined
         const uri = process.env.MONGO_URI;
+        if (!uri) {
+            throw new Error('MONGO_URI environment variable is not set. Please check your .env file.');
+        }
+
+        // Log connection details (without sensitive info)
         const dbName = uri.split('/').pop().split('?')[0];
         const authSource = uri.includes('authSource=') 
             ? uri.split('authSource=')[1].split('&')[0] 
