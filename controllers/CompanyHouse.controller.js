@@ -57,8 +57,6 @@ const startImport = async (req, res) => {
 };
 
 const processFiles = async (files) => {
-    console.log("files to process:", files);
-    
     try {
         for (let i = 0; i < files.length; i++) {
             const file = files[i];
