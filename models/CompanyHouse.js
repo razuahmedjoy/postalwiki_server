@@ -17,18 +17,11 @@ const companyHouseSchema = new mongoose.Schema({
     AddressLine1: String,
     AddressLine2: String,
     PostTown: String,
-    PostCode: String
+    PostCode: String,
+    County: String
   },
   CompanyStatus: String,
-  IncorporationDate: String, // Stored as string in d/m/Y format to match PHP implementation
-  date: { 
-    type: Date, 
-    default: Date.now 
-  }, // Import date
-  is_blacklisted: { 
-    type: Boolean, 
-    default: false 
-  }
+  IncorporationDate: String // Stored as string in d/m/Y format to match PHP implementation
 }, { 
   timestamps: true, 
   collection: 'company_house', 
@@ -46,9 +39,6 @@ companyHouseSchema.index({ CompanyStatus: 1 }, { background: true });
 
 // Index on PostCode for location-based queries
 companyHouseSchema.index({ 'RegAddress.PostCode': 1 }, { background: true });
-
-// Index on import date for sorting
-companyHouseSchema.index({ date: -1 }, { background: true });
 
 // Index on timestamps for tracking
 companyHouseSchema.index({ createdAt: -1 }, { background: true });
