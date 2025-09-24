@@ -57,8 +57,6 @@ const startImport = async (req, res) => {
 };
 
 const processFiles = async (files) => {
-    console.log("files to process:", files);
-    
     try {
         for (let i = 0; i < files.length; i++) {
             const file = files[i];
@@ -163,11 +161,13 @@ const getPaginatedCompanies = async (req, res) => {
         let projection = { 
             CompanyName: 1, 
             CompanyNumber: 1, 
+            'RegAddress.AddressLine1': 1,
+            'RegAddress.AddressLine2': 1,
             'RegAddress.PostCode': 1,
             'RegAddress.PostTown': 1,
+            'RegAddress.County': 1,
             CompanyStatus: 1,
             IncorporationDate: 1,
-            date: 1, 
             createdAt: 1 
         };
 
@@ -347,6 +347,45 @@ const stopImport = async (req, res) => {
     }
 };
 
+const deleteAllData = async (req, res) => {
+    try {
+        // Check if confirmation is provided
+        const { confirm } = req.body;
+        
+        if (!confirm || confirm !== 'DELETE_ALL_COMPANY_HOUSE_DATA') {
+            return res.status(400).json({
+                success: false,
+                message: 'Confirmation required. Please provide { "confirm": "DELETE_ALL_COMPANY_HOUSE_DATA" } in request body.'
+            });
+        }
+
+        // Get count before deletion for logging
+        const countBeforeDeletion = await CompanyHouse.countDocuments();
+        
+        companyHouseLogger.warn(`Starting deletion of all CompanyHouse data. Total records: ${countBeforeDeletion}`);
+        
+        // Delete all documents
+        const result = await CompanyHouse.deleteMany({});
+        
+        companyHouseLogger.warn(`Successfully deleted ${result.deletedCount} CompanyHouse records`);
+        
+        res.json({
+            success: true,
+            message: `Successfully deleted all CompanyHouse data`,
+            deletedCount: result.deletedCount,
+            previousCount: countBeforeDeletion
+        });
+        
+    } catch (error) {
+        companyHouseLogger.error('Error deleting all CompanyHouse data:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message,
+            message: 'Failed to delete CompanyHouse data'
+        });
+    }
+};
+
 const CompanyHouseController = {
     startImport,
     getStats,
@@ -355,6 +394,7 @@ const CompanyHouseController = {
     getCompanyByNumber,
     searchCompanies,
     stopImport,
+    deleteAllData,
 };
 
 module.exports = {

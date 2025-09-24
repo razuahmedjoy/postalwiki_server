@@ -116,11 +116,11 @@ const processRecord = (record, index) => {
                 AddressLine1: cleanText(record[4] || record.AddressLine1),
                 AddressLine2: cleanText(record[5] || record.AddressLine2),
                 PostTown: cleanText(record[6] || record.PostTown),
+                County: cleanText(record[7] || record.County),
                 PostCode: cleanText(record[9] || record.PostCode)
             },
             CompanyStatus: cleanText(record[11] || record.CompanyStatus),
-            IncorporationDate: parseDate(record[14] || record.IncorporationDate),
-            date: new Date()
+            IncorporationDate: parseDate(record[14] || record.IncorporationDate)
         };
 
         return processedRecord;
@@ -145,7 +145,7 @@ const processFile = async (filePath) => {
             columns: false, // Don't use headers as column names, use array indices
             skip_empty_lines: true,
             trim: true,
-            from_line: 2, // Skip header row (PHP setSkipHeader(true))
+            from_line: 2, // Skip header row 
             relax_column_count: true
         });
 
