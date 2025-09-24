@@ -15,5 +15,6 @@ router.get('/paginated', CompanyHouseController.getPaginatedCompanies);
 // Protected routes (auth required)
 router.post('/import', CompanyHouseController.startImport);
 router.post('/stop-import', CompanyHouseController.stopImport);
+router.delete('/delete-all', CompanyHouseController.deleteAllData);
 
 module.exports = router;

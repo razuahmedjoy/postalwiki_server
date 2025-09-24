@@ -1,64 +1,46 @@
-// config/loggers/companyHouseLogger.js
-const winston = require('winston');
+const { createLogger, format, transports } = require('winston');
+const DailyRotateFile = require('winston-daily-rotate-file');
 const path = require('path');
-
-const logDir = path.join(__dirname, '../../logs/company_house');
-
-// Ensure log directory exists
 const fs = require('fs');
-if (!fs.existsSync(logDir)) {
-    fs.mkdirSync(logDir, { recursive: true });
+
+// Ensure logs directory exists
+const logsDir = path.join(process.cwd(), 'logs/company_house');
+if (!fs.existsSync(logsDir)) {
+    fs.mkdirSync(logsDir, { recursive: true });
 }
 
-const companyHouseLogger = winston.createLogger({
-    level: 'info',
-    format: winston.format.combine(
-        winston.format.timestamp(),
-        winston.format.errors({ stack: true }),
-        winston.format.json()
+const companyHouseLogger = createLogger({
+    level: 'debug',
+    format: format.combine(
+        format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+        format.printf(({ timestamp, level, message }) => `${timestamp} ${level}: ${message}`)
     ),
-    defaultMeta: { service: 'company-house' },
     transports: [
-        // Write all logs with level `error` and below to `error.log`
-        new winston.transports.File({
-            filename: path.join(logDir, 'error-company-house.log'),
-            level: 'error',
-            format: winston.format.combine(
-                winston.format.timestamp(),
-                winston.format.errors({ stack: true }),
-                winston.format.json()
-            )
-        }),
-        // Write all logs with level `info` and below to `company-house.log`
-        new winston.transports.File({
-            filename: path.join(logDir, 'company-house.log'),
-            format: winston.format.combine(
-                winston.format.timestamp(),
-                winston.format.json()
-            )
-        }),
-        // Write all logs with level `debug` and below to `company-house-debug.log`
-        new winston.transports.File({
-            filename: path.join(logDir, 'company-house-debug.log'),
+        new transports.Console({
             level: 'debug',
-            format: winston.format.combine(
-                winston.format.timestamp(),
-                winston.format.errors({ stack: true }),
-                winston.format.json()
+            format: format.combine(
+                format.colorize(),
+                format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+                format.printf(({ timestamp, level, message }) => `[COMPANY_HOUSE] ${timestamp} ${level}: ${message}`)
             )
+        }),
+        new DailyRotateFile({
+            filename: 'company_house-%DATE%.log',
+            datePattern: 'YYYY-MM-DD',
+            maxSize: '20m',
+            maxFiles: '30d', // Keep logs for 30 days
+            dirname: 'logs/company_house',
+            level: 'debug'
+        }),
+        new DailyRotateFile({
+            filename: 'company_house-error-%DATE%.log',
+            datePattern: 'YYYY-MM-DD',
+            maxSize: '20m',
+            maxFiles: '30d',
+            dirname: 'logs/company_house',
+            level: 'error'
         })
-    ]
+    ],
 });
-
-// If we're not in production then log to the `console` with the format:
-// `${info.level}: ${info.message} JSON.stringify({ ...rest }) `
-if (process.env.NODE_ENV !== 'production') {
-    companyHouseLogger.add(new winston.transports.Console({
-        format: winston.format.combine(
-            winston.format.colorize(),
-            winston.format.simple()
-        )
-    }));
-}
 
 module.exports = companyHouseLogger;
