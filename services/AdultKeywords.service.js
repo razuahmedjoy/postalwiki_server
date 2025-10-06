@@ -262,6 +262,7 @@ const mergeRecordsForSameUrl = (docs, filename) => {
 const checkExactMatch = (text) => {
     if (!text) return null;
     const lowerText = text.toLowerCase();
+    const matches = [];
 
     for (const keyword of adultKeywords_exact_match) {
         const lowerKeyword = keyword.toLowerCase();
@@ -269,15 +270,21 @@ const checkExactMatch = (text) => {
         if (lowerText.includes(lowerKeyword)) {
             const regex = new RegExp(`\\b${lowerKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
             if (regex.test(text)) {
-                // If match is "models" or "message", ignore it
-                if (lowerKeyword === 'models' || lowerKeyword === 'message') {
-                    continue;
-                }
-                return keyword;
+                matches.push(keyword);
             }
         }
     }
-    return null;
+
+    // If only one match found and it's "models" or "message", ignore it
+    if (matches.length === 1) {
+        const lowerMatch = matches[0].toLowerCase();
+        if (lowerMatch === 'models' || lowerMatch === 'message') {
+            return null;
+        }
+    }
+
+    // Return the first match if any valid matches found
+    return matches.length > 0 ? matches[0] : null;
 };
 
 // Check if text contains any adult keywords from contains list
