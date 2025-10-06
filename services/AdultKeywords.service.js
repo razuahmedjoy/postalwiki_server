@@ -41,18 +41,18 @@ const clearCurrentFileTracking = () => {
 const moveCompletedFile = async (filePath, filename) => {
     try {
         const completedDir = path.join(MATCH_DIR, 'completed_' + new Date().toISOString().split('T')[0]);
-        
+
         // Create completed directory if it doesn't exist
         await fs.promises.mkdir(completedDir, { recursive: true });
-        
+
         const sourcePath = filePath;
         const destinationPath = path.join(completedDir, filename);
-        
+
         // Move the file
         await fs.promises.rename(sourcePath, destinationPath);
-        
+
         adultKeywordsLogger.info(`Moved completed file ${filename} to ${completedDir}`);
-        
+
     } catch (error) {
         adultKeywordsLogger.error(`Error moving completed file ${filename}:`, error);
         // Don't throw error - file processing was successful, just couldn't move it
@@ -63,16 +63,16 @@ const moveCompletedFile = async (filePath, filename) => {
 const cleanupOldCompletedFolders = async () => {
     try {
         const matchDir = await fs.promises.readdir(MATCH_DIR);
-        const completedFolders = matchDir.filter(item => 
-            item.startsWith('completed_') && 
+        const completedFolders = matchDir.filter(item =>
+            item.startsWith('completed_') &&
             fs.statSync(path.join(MATCH_DIR, item)).isDirectory()
         );
-        
+
         if (completedFolders.length > 7) {
             // Sort by date (oldest first) and remove oldest ones
             const sortedFolders = completedFolders.sort();
             const foldersToRemove = sortedFolders.slice(0, completedFolders.length - 7);
-            
+
             for (const folder of foldersToRemove) {
                 const folderPath = path.join(MATCH_DIR, folder);
                 await fs.promises.rm(folderPath, { recursive: true, force: true });
@@ -89,27 +89,27 @@ const cleanupOldCompletedFolders = async () => {
 const getCompletedFilesStats = async () => {
     try {
         const matchDir = await fs.promises.readdir(MATCH_DIR);
-        const completedFolders = matchDir.filter(item => 
-            item.startsWith('completed_') && 
+        const completedFolders = matchDir.filter(item =>
+            item.startsWith('completed_') &&
             fs.statSync(path.join(MATCH_DIR, item)).isDirectory()
         );
-        
+
         let totalCompletedFiles = 0;
         const folderStats = [];
-        
+
         for (const folder of completedFolders) {
             const folderPath = path.join(MATCH_DIR, folder);
             const files = await fs.promises.readdir(folderPath);
             const csvFiles = files.filter(file => file.endsWith('.csv'));
             totalCompletedFiles += csvFiles.length;
-            
+
             folderStats.push({
                 folder,
                 fileCount: csvFiles.length,
                 files: csvFiles
             });
         }
-        
+
         return {
             totalCompletedFolders: completedFolders.length,
             totalCompletedFiles,
@@ -145,12 +145,12 @@ const resetMatchingProgress = () => {
     matchingProgressTracker.errors = [];
     matchingProgressTracker.isComplete = false;
     matchingProgressTracker.isRunning = false;
-    
+
     // Clear URL tracking for new process
     currentFileProcessedUrls.clear();
     currentFileExactMatches = 0;
     currentFileContainsMatches = 0;
-    
+
     adultKeywordsLogger.info('Reset adult keywords matching progress tracker');
 };
 
@@ -262,13 +262,17 @@ const mergeRecordsForSameUrl = (docs, filename) => {
 const checkExactMatch = (text) => {
     if (!text) return null;
     const lowerText = text.toLowerCase();
-    
+
     for (const keyword of adultKeywords_exact_match) {
         const lowerKeyword = keyword.toLowerCase();
-        
+
         if (lowerText.includes(lowerKeyword)) {
             const regex = new RegExp(`\\b${lowerKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
             if (regex.test(text)) {
+                // If match is "models" or "message", ignore it
+                if (lowerKeyword === 'models' || lowerKeyword === 'message') {
+                    continue;
+                }
                 return keyword;
             }
         }
@@ -281,17 +285,27 @@ const checkContainsMatch = (text) => {
     if (!text) return [];
     const lowerText = text.toLowerCase();
     const matches = [];
-    
+
     for (const keyword of adultKeywords_contains) {
         const lowerKeyword = keyword.toLowerCase();
-        
+
         if (lowerText.includes(lowerKeyword)) {
             const regex = new RegExp(`\\b${lowerKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
             if (regex.test(text)) {
                 matches.push(keyword);
             }
         }
+
     }
+
+    // If only one match found and it's "models" or "message", ignore it
+    if (matches.length === 1) {
+        const lowerMatch = matches[0].toLowerCase();
+        if (lowerMatch === 'models' || lowerMatch === 'message') {
+            return [];
+        }
+    }
+
     return matches;
 };
 
@@ -303,7 +317,7 @@ const processBatch = async (records, filename) => {
         // Memory check for VPS constraints
         const memUsage = process.memoryUsage();
         const memoryUsagePercent = memUsage.heapUsed / memUsage.heapTotal;
-        
+
         if (memoryUsagePercent > MEMORY_THRESHOLD) {
             adultKeywordsLogger.warn(`High memory usage detected: ${Math.round(memoryUsagePercent * 100)}%. Forcing garbage collection.`);
             if (global.gc) {
@@ -313,7 +327,7 @@ const processBatch = async (records, filename) => {
 
         // Records parameter is already an array of processed records from processFile
         const processedRecords = records;
-        
+
         if (processedRecords.length === 0) return;
 
         // Group records by URL
@@ -331,7 +345,7 @@ const processBatch = async (records, filename) => {
             const mergedDoc = mergeRecordsForSameUrl(docs, filename);
             mergedRecords.push(mergedDoc);
         }
-        
+
         // Clear memory
         urlMap.clear();
 
@@ -348,13 +362,13 @@ const processBatch = async (records, filename) => {
         // Process records according to your logic
         const exactMatchUpdates = [];
         const containsMatchReferences = [];
-        
+
         // Track URLs that have been processed in this batch to avoid duplicate logging
         const processedUrlsInBatch = new Set();
 
         for (const record of mergedRecords) {
             const { url, title, meta_description, keywords } = record;
-            
+
             // Skip if not in social scrape database
             if (!socialScrapeMap.has(url)) {
                 continue;
@@ -372,42 +386,42 @@ const processBatch = async (records, filename) => {
                     currentFileProcessedUrls.add(url);
                     currentFileExactMatches++;
                 }
-                
+
                 exactMatchUpdates.push({
                     updateOne: {
                         filter: { url: url },
                         update: {
-                $set: {
-                    title: "Possible 18+ content – text / image removed",
-                    meta_description: "Possible 18+ content – text / image removed",
-                    is_adult_content: true
-                }
-            }
+                            $set: {
+                                title: "Possible 18+ content – text / image removed",
+                                meta_description: "Possible 18+ content – text / image removed",
+                                is_adult_content: true
+                            }
+                        }
                     }
                 });
-                
+
                 matchingProgressTracker.exactMatches++;
                 matchingProgressTracker.updatedRecords++;
             } else {
                 // Check for contains matches
-        const titleContains = checkContainsMatch(title);
-        const descContains = checkContainsMatch(meta_description);
-        const keywordsContains = checkContainsMatch(keywords);
+                const titleContains = checkContainsMatch(title);
+                const descContains = checkContainsMatch(meta_description);
+                const keywordsContains = checkContainsMatch(keywords);
 
                 if (titleContains.length > 0 || descContains.length > 0 || keywordsContains.length > 0) {
                     const allMatches = [...new Set([...titleContains, ...descContains, ...keywordsContains])];
-                    
+
                     if (!processedUrlsInBatch.has(url) && !currentFileProcessedUrls.has(url)) {
                         processedUrlsInBatch.add(url);
                         currentFileProcessedUrls.add(url);
                         currentFileContainsMatches++;
                     }
-                    
+
                     // Create reference data
-        const referenceData = {
-            url,
+                    const referenceData = {
+                        url,
                         matched_keywords: allMatches,
-            match_type: 'contains',
+                        match_type: 'contains',
                         csv_source: filename
                     };
 
@@ -419,7 +433,7 @@ const processBatch = async (records, filename) => {
                     matchingProgressTracker.containsMatches++;
                 }
             }
-            
+
             matchingProgressTracker.processed++;
         }
 
@@ -455,8 +469,8 @@ const processBatch = async (records, filename) => {
                 const referenceResult = await AdultKeywordsReference.bulkWrite(containsMatchReferences.map(ref => ({
                     updateOne: {
                         filter: { url: ref.url },
-                        update: { 
-                            $set: { 
+                        update: {
+                            $set: {
                                 ...ref,
                                 updated_at: new Date()
                             }
@@ -474,7 +488,7 @@ const processBatch = async (records, filename) => {
                 // Fallback to individual operations
                 for (const ref of containsMatchReferences) {
                     try {
-            await AdultKeywordsReference.updateOne(
+                        await AdultKeywordsReference.updateOne(
                             { url: ref.url },
                             { $set: { ...ref, updated_at: new Date() } },
                             { upsert: true }
@@ -495,7 +509,7 @@ const processBatch = async (records, filename) => {
 
         // Log batch results (essential for monitoring progress)
         adultKeywordsLogger.info(`Batch: ${processedRecords.length} records, ${updatedCount} updated, ${referenceCount} references`);
-        
+
     } catch (error) {
         adultKeywordsLogger.error(`Error processing batch from ${filename}:`, error);
         matchingProgressTracker.errors.push({
@@ -509,12 +523,12 @@ const processBatch = async (records, filename) => {
 const processFile = async (filePath) => {
     try {
         const filename = path.basename(filePath);
-        
+
         // Clear tracking for new file
         clearCurrentFileTracking();
-        
+
         matchingProgressTracker.currentFile = filename;
-        
+
         let processed = 0;
         let currentBatch = [];
         let skippedLines = 0;
@@ -544,14 +558,14 @@ const processFile = async (filePath) => {
 
             parser.on('readable', async () => {
                 let record;
-                
+
                 while ((record = parser.read()) !== null) {
                     try {
                         // Skip status code records that don't contain content we need
                         if (record.CODE === '[SC]' || record.CODE === '[EM]' || record.CODE === '[FB]' || record.CODE === '[LK]' || record.CODE === '[TW]' || record.CODE === '[YT]') {
                             continue;
                         }
-                        
+
                         const processedRecord = processRecord(record);
                         if (processedRecord) {
                             currentBatch.push(processedRecord);
@@ -570,7 +584,7 @@ const processFile = async (filePath) => {
                                 currentBatch = [];
                             }
                         }
-    } catch (error) {
+                    } catch (error) {
                         skippedLines++;
                         matchingProgressTracker.errors.push({
                             filename,
@@ -583,7 +597,7 @@ const processFile = async (filePath) => {
             parser.on('end', async () => {
                 try {
                     clearTimeout(processingTimeout);
-                    
+
                     // Process remaining records in the final batch
                     if (currentBatch.length > 0) {
                         await processBatch([...currentBatch], filename);
@@ -593,14 +607,14 @@ const processFile = async (filePath) => {
                     if (global.gc) {
                         global.gc();
                     }
-                    
+
                     // Clear current file tracking to free memory
                     clearCurrentFileTracking();
 
                     // Log file completion with unique matches summary
                     const uniqueExactMatches = currentFileExactMatches;
                     const uniqueContainsMatches = currentFileContainsMatches;
-                    
+
                     adultKeywordsLogger.info(`Completed: ${filename} - ${processed} records, ${skippedLines} skipped, ${uniqueExactMatches} unique exact matches, ${uniqueContainsMatches} unique contains matches`);
 
                     // Move completed file to completed_date folder
@@ -627,7 +641,7 @@ const processFile = async (filePath) => {
             fs.createReadStream(filePath, { highWaterMark: 1024 * 1024 })
                 .pipe(parser);
         });
-        
+
     } catch (error) {
         adultKeywordsLogger.error(`Error processing file ${filePath}:`, error);
         throw error;
@@ -714,7 +728,7 @@ const processFiles = async (files) => {
                 await processFile(filePath);
 
                 adultKeywordsLogger.info(`Completed file ${i + 1}/${files.length}: ${file}`);
-                
+
                 if (!matchingProgressTracker.isRunning) {
                     adultKeywordsLogger.info('Adult keywords matching was stopped, stopping file processing');
                     break;
@@ -734,7 +748,7 @@ const processFiles = async (files) => {
         matchingProgressTracker.isComplete = true;
         matchingProgressTracker.currentFile = null;
         setMatchingRunning(false);
-        
+
         // Log completion summary
         adultKeywordsLogger.info('Adult keywords matching completed', {
             filesProcessed: files.length,
@@ -744,7 +758,7 @@ const processFiles = async (files) => {
             createdReferences: matchingProgressTracker.createdReferences,
             errors: matchingProgressTracker.errors.length
         });
-        
+
     } catch (error) {
         adultKeywordsLogger.error('Error in processFiles for adult keywords matching:', error);
         matchingProgressTracker.errors.push({
@@ -768,7 +782,7 @@ const getStats = async () => {
         const unprocessedReferences = await AdultKeywordsReference.countDocuments({ processed: false });
         const exactMatches = await AdultKeywordsReference.countDocuments({ match_type: 'exact' });
         const containsMatches = await AdultKeywordsReference.countDocuments({ match_type: 'contains' });
-        
+
         return {
             totalReferences,
             unprocessedReferences,
@@ -797,22 +811,22 @@ const getPaginatedReferences = async (page = 1, limit = 50, matchType = null, pr
     try {
         const skip = (page - 1) * limit;
         const filter = {};
-        
+
         if (matchType) {
             filter.match_type = matchType;
         }
-        
+
         if (processed !== null) {
             filter.processed = processed;
         }
-        
+
         const references = await AdultKeywordsReference.find(filter)
             .sort({ created_at: -1 })
             .skip(skip)
             .limit(limit);
-            
+
         const total = await AdultKeywordsReference.countDocuments(filter);
-        
+
         return {
             references,
             pagination: {
@@ -840,7 +854,7 @@ const bulkProcessReferences = async (recordIds, isAdultContent) => {
         let updated = 0;
 
         const references = await AdultKeywordsReference.find({ _id: { $in: recordIds } });
-        
+
         if (references.length === 0) {
             throw new Error('No references found with the provided IDs');
         }
@@ -866,8 +880,8 @@ const bulkProcessReferences = async (recordIds, isAdultContent) => {
 
                 await AdultKeywordsReference.updateOne(
                     { _id: reference._id },
-                    { 
-                        $set: { 
+                    {
+                        $set: {
                             processed: true,
                             processed_at: new Date(),
                             updated_at: new Date()
