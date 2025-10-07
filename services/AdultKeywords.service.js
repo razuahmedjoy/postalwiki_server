@@ -305,10 +305,10 @@ const checkContainsMatch = (text) => {
 
     }
 
-    // If only one match found and it's "models" or "message", ignore it
+    // If only one match found and it's "models" or "massage", ignore it
     if (matches.length === 1) {
         const lowerMatch = matches[0].toLowerCase();
-        if (lowerMatch === 'models' || lowerMatch === 'message') {
+        if (lowerMatch === 'models' || lowerMatch === 'massage') {
             return [];
         }
     }
