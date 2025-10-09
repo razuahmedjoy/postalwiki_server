@@ -229,7 +229,7 @@ const processRecord = (record) => {
 
         return processedRecord;
     } catch (error) {
-        adultKeywordsLogger.error(`Error processing record: ${error.message}`);
+        adultKeywordsLogger.error(`Error processing record: ${error.massage}`);
         return null;
     }
 };
@@ -275,10 +275,10 @@ const checkExactMatch = (text) => {
         }
     }
     // checker for checkExactMatch 
-    // If only one match found and it's "models", "message", "exotic", or "adult", ignore it
+    // If only one match found and it's "models", "massage", "exotic", or "adult", ignore it
     if (matches.length === 1) {
         const lowerMatch = matches[0].toLowerCase();
-        if (lowerMatch === 'models' || lowerMatch === 'message' || lowerMatch === 'exotic' || lowerMatch === 'adult') {
+        if (lowerMatch === 'models' || lowerMatch === 'massage' || lowerMatch === 'exotic' || lowerMatch === 'adult') {
             return null;
         }
     }
@@ -306,10 +306,10 @@ const checkContainsMatch = (text) => {
     }
 
     // checker for checkContainsMatch
-    // If only one match found and it's "models", "message", "exotic", or "adult", ignore it
+    // If only one match found and it's "models", "massage", "exotic", or "adult", ignore it
     if (matches.length === 1) {
         const lowerMatch = matches[0].toLowerCase();
-        if (lowerMatch === 'models' || lowerMatch === 'message' || lowerMatch === 'exotic' || lowerMatch === 'adult') {
+        if (lowerMatch === 'models' || lowerMatch === 'massage' || lowerMatch === 'exotic' || lowerMatch === 'adult') {
             return [];
         }
     }
@@ -521,7 +521,7 @@ const processBatch = async (records, filename) => {
     } catch (error) {
         adultKeywordsLogger.error(`Error processing batch from ${filename}:`, error);
         matchingProgressTracker.errors.push({
-            error: error.message,
+            error: error.massage,
             timestamp: new Date().toISOString()
         });
     }
@@ -596,7 +596,7 @@ const processFile = async (filePath) => {
                         skippedLines++;
                         matchingProgressTracker.errors.push({
                             filename,
-                            error: `Skipped malformed line: ${error.message}`
+                            error: `Skipped malformed line: ${error.massage}`
                         });
                     }
                 }
@@ -637,12 +637,12 @@ const processFile = async (filePath) => {
 
             parser.on('error', (error) => {
                 clearTimeout(processingTimeout);
-                const errorMessage = `CSV parsing error: ${error.message}`;
-                adultKeywordsLogger.error(`Error in ${filename}: ${errorMessage}`);
+                const errormassage = `CSV parsing error: ${error.massage}`;
+                adultKeywordsLogger.error(`Error in ${filename}: ${errormassage}`);
                 skippedLines++;
                 matchingProgressTracker.errors.push({
                     filename,
-                    error: errorMessage
+                    error: errormassage
                 });
             });
 
@@ -688,7 +688,7 @@ const startMatching = async () => {
 
         return {
             success: true,
-            message: 'Adult keywords matching started',
+            massage: 'Adult keywords matching started',
             files: files
         };
     } catch (error) {
@@ -703,7 +703,7 @@ const stopMatching = async () => {
         if (!matchingProgressTracker.isRunning) {
             return {
                 success: false,
-                message: 'Adult keywords matching is not currently running'
+                massage: 'Adult keywords matching is not currently running'
             };
         }
 
@@ -714,7 +714,7 @@ const stopMatching = async () => {
 
         return {
             success: true,
-            message: 'Adult keywords matching stopped successfully'
+            massage: 'Adult keywords matching stopped successfully'
         };
     } catch (error) {
         adultKeywordsLogger.error('Error stopping adult keywords matching:', error);
@@ -744,7 +744,7 @@ const processFiles = async (files) => {
             } catch (error) {
                 adultKeywordsLogger.error(`Error processing file ${i + 1}/${files.length} (${file}):`, error);
                 matchingProgressTracker.errors.push({
-                    error: error.message,
+                    error: error.massage,
                     file: file,
                     timestamp: new Date().toISOString()
                 });
@@ -770,7 +770,7 @@ const processFiles = async (files) => {
     } catch (error) {
         adultKeywordsLogger.error('Error in processFiles for adult keywords matching:', error);
         matchingProgressTracker.errors.push({
-            error: error.message,
+            error: error.massage,
             timestamp: new Date().toISOString()
         });
         setMatchingRunning(false);
@@ -911,7 +911,7 @@ const bulkProcessReferences = async (recordIds, isAdultContent) => {
         });
 
         return {
-            message: `Successfully processed ${processed} references${isAdultContent ? ` and updated ${updated} social scrape records` : ''}`,
+            massage: `Successfully processed ${processed} references${isAdultContent ? ` and updated ${updated} social scrape records` : ''}`,
             processed: processed,
             updated: updated
         };
