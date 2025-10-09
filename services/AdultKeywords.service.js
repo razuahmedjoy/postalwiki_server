@@ -274,11 +274,11 @@ const checkExactMatch = (text) => {
             }
         }
     }
-
-    // If only one match found and it's "models" or "message", ignore it
+    // checker for checkExactMatch 
+    // If only one match found and it's "models", "massage", "exotic", or "adult", ignore it
     if (matches.length === 1) {
         const lowerMatch = matches[0].toLowerCase();
-        if (lowerMatch === 'models' || lowerMatch === 'message') {
+        if (lowerMatch === 'models' || lowerMatch === 'massage' || lowerMatch === 'exotic' || lowerMatch === 'adult') {
             return null;
         }
     }
@@ -305,10 +305,11 @@ const checkContainsMatch = (text) => {
 
     }
 
-    // If only one match found and it's "models" or "massage", ignore it
+    // checker for 
+    // If only one match found and it's "models", "massage", "exotic", or "adult", ignore it
     if (matches.length === 1) {
         const lowerMatch = matches[0].toLowerCase();
-        if (lowerMatch === 'models' || lowerMatch === 'massage') {
+        if (lowerMatch === 'models' || lowerMatch === 'massage' || lowerMatch === 'exotic' || lowerMatch === 'adult') {
             return [];
         }
     }
