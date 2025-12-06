@@ -1,0 +1,15 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 30
+    },
+    "auditLog": "logs\\social_scrape\\.5035117cbb1ab9d72e76c35be4ed1f296f94eeb3-audit.json",
+    "files": [
+        {
+            "date": 1765031267841,
+            "name": "logs/social_scrape/social_scrape-error-2025-12-06.log",
+            "hash": "da2752843f68b9dd7b9e0577e15a34e2935cf4147c9a4d7cfa539734f1c3fbc6"
+        }
+    ],
+    "hashType": "sha256"
+}
