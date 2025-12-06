@@ -16,9 +16,9 @@ async function createAdmin() {
         console.log('🚀 Starting admin user creation...');
         
         // Connect to MongoDB
-        const mongoUri = process.env.MONGO_URI;
+        const mongoUri = process.env.MONGODB_URI;
         if (!mongoUri) {
-            throw new Error('MONGO_URI environment variable is not set');
+            throw new Error('MONGODB_URI environment variable is not set');
         }
         
         console.log('📊 Connecting to MongoDB...');

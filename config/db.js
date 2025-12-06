@@ -4,7 +4,7 @@ const logger = require('./logger.js');
 const connectDB = async () => {
     try {
         // Check if MONGO_URI is defined
-        const uri = process.env.MONGO_URI;
+        const uri = process.env.MONGODB_URI;
         if (!uri) {
             throw new Error('MONGO_URI environment variable is not set. Please check your .env file.');
         }
