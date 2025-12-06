@@ -6,13 +6,12 @@ module.exports = {
     autorestart: true,
     watch: false,
     max_memory_restart: '1G',
+    env_file: './.env', // Load .env file
     env: {
-      NODE_ENV: 'development',
-      PORT: 3000
+      NODE_ENV: 'development'
     },
     env_production: {
-      NODE_ENV: 'production',
-      PORT: process.env.PORT || 3000
+      NODE_ENV: 'production'
     },
     // Logging
     log_file: './logs/combined.log',
