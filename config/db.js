@@ -25,7 +25,7 @@ const connectDB = async () => {
             bufferCommands: false,
             maxPoolSize: 10,
             retryWrites: true,
-            w: 'majority'
+            w: 'majority',
         };
 
         // Connect with timeout
