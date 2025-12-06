@@ -50,7 +50,7 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
           source: deploy/
-          target: /home/dev/admin.socialwiki.co.uk
+          target: /home/dev/api.socialwiki.co.uk
           rm: true
 
       # 4️⃣ Create production .env on server
@@ -60,9 +60,9 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 1337
+          port: 22
           script: |
-            cd /home/dev/admin.socialwiki.co.uk/deploy
+            cd /home/dev/api.socialwiki.co.uk/deploy
             cat > .env <<EOF
             NODE_ENV=production
             PORT=${{ secrets.PORT }}
@@ -78,9 +78,9 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 1337
+          port: 22
           script: |
-            cd /home/dev/admin.socialwiki.co.uk/deploy
+            cd /home/dev/api.socialwiki.co.uk/deploy
             if [ -f package-lock.json ]; then
               npm ci --production
             else
@@ -94,9 +94,9 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 1337
+          port: 22
           script: |
-            cd /home/dev/admin.socialwiki.co.uk/deploy
+            cd /home/dev/api.socialwiki.co.uk/deploy
             
             # Create logs directory if it doesn't exist
             mkdir -p logs
