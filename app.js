@@ -18,7 +18,7 @@ app.use(express.json({ limit: '50mb' })); // Increased limit for large requests
 
 // CORS configuration - Move this before other middleware
 const corsOptions = {
-    origin: ['http://localhost:5173','http://localhost:5174', 'https://admin.postalwiki.co.uk', 'https://api.postalwiki.co.uk'],
+    origin: ['http://localhost:5173','http://localhost:5174','https://admin.socialwiki.co.uk', 'https://admin.postalwiki.co.uk', 'https://api.postalwiki.co.uk'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
     exposedHeaders: ['Content-Range', 'X-Content-Range'],
@@ -33,6 +33,35 @@ app.use(cors(corsOptions));
 
 // Handle preflight requests explicitly
 app.options('*', cors(corsOptions));
+
+// Health check endpoint (public, no auth required)
+app.get('/health', (req, res) => {
+    res.status(200).json({
+        status: 'OK',
+        message: 'API is running successfully',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        version: process.env.npm_package_version || '1.0.0',
+        environment: process.env.NODE_ENV || 'development',
+        port: process.env.PORT || 'Not specified'
+    });
+});
+
+// API status endpoint with more detailed info
+app.get('/api/status', (req, res) => {
+    res.status(200).json({
+        status: 'OK',
+        message: 'PostalWiki Admin API is operational',
+        timestamp: new Date().toISOString(),
+        uptime: `${Math.floor(process.uptime())} seconds`,
+        memory: {
+            used: `${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)} MB`,
+            total: `${Math.round(process.memoryUsage().heapTotal / 1024 / 1024)} MB`
+        },
+        version: '1.0.0',
+        environment: process.env.NODE_ENV || 'development'
+    });
+});
 
 // Add timeout handling
 app.use((req, res, next) => {
