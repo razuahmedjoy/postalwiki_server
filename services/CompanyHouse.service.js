@@ -12,7 +12,7 @@ const { archiveFile } = require('../utils/fileUtils');
 const BATCH_SIZE = 2000;
 // Number of batches to process in parallel (bounded concurrency)
 const PARALLEL_BATCHES = 2;
-const IMPORT_DIR = path.join(__dirname, '../imports/company_house');
+const IMPORT_DIR = path.join(__dirname, '../imports/company_house/');
 
 // Progress tracker
 const importProgressTracker = {

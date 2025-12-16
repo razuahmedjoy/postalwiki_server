@@ -9,7 +9,7 @@ const botsolLogger = require('../config/loggers/botsolLogger');
 // Configuration
 const BATCH_SIZE = 2000;
 const PARALLEL_BATCHES = 2;
-const IMPORT_DIR = path.join(__dirname, '../imports/botsol');
+const IMPORT_DIR = path.join(__dirname, '../imports/botsol/');
 
 // Progress tracker
 const importProgressTracker = {
