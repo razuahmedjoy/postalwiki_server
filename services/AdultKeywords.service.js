@@ -8,7 +8,7 @@ const { adultKeywords_exact_match, adultKeywords_contains } = require('../utils/
 const adultKeywordsLogger = require('../config/loggers/adultKeywordsLogger');
 const { isValidDomain } = require('../utils/helpers');
 
-const MATCH_DIR = path.join(__dirname, '../update/social_scrape/match_adult_keywords');
+const MATCH_DIR = path.join(__dirname, '../imports/social_scrape_match_adult_keywords/');
 const BATCH_SIZE = 1000; // Reduced from 2000 for 4GB VPS
 const MEMORY_THRESHOLD = 0.8; // 80% memory usage threshold
 
