@@ -12,9 +12,9 @@ const areaCodes = require('../utils/areaCodes');
 // Reduced batch size and parallel processing for 4GB RAM, 2-core VPS
 const BATCH_SIZE = 2000; // Reduced from 50000 to 1000 for better reliability
 const PARALLEL_BATCHES = 2; // Reduced to match CPU cores
-const IMPORT_DIR = path.join(__dirname, '../imports/social_scrape');
-const BLACKLIST_DIR = path.join(__dirname, '../imports/social_scrape_blacklisted');
-const PHONE_DIR = path.join(__dirname, '../imports/social_scrape_phone');
+const IMPORT_DIR = path.join(__dirname, '../imports/social_scrape/');
+const BLACKLIST_DIR = path.join(__dirname, '../imports/social_scrape_blacklisted/');
+const PHONE_DIR = path.join(__dirname, '../imports/social_scrape_phone/');
 
 // // Create separate event emitters for each process
 // const importEventEmitter = new EventEmitter();
