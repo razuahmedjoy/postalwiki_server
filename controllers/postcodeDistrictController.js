@@ -106,7 +106,7 @@ async function processCsvFile(filePath, job) {
         // Finish
         job.status = 'completed';
         await job.save();
-        postcodeLogger.info(`Job ${job._id} completed. Total processed: ${processedCount}, Inserted: ${job.insertedCount}, Errors: ${job.errors}`);
+        postcodeLogger.info(`Job ${job._id} completed. Total processed: ${processedCount}, Inserted: ${job.insertedCount}, Errors: ${job.errorCount}`);
 
     } catch (error) {
         postcodeLogger.error(`Error processing CSV for job ${job._id}: ${error.message}`);
@@ -118,7 +118,7 @@ async function processCsvFile(filePath, job) {
             postcodeLogger.warn(`Fixed NaN insertedCount before saving failure status.`);
             job.insertedCount = 0;
         }
-        if (isNaN(job.errors)) job.errors = 0;
+        if (isNaN(job.errorCount)) job.errorCount = 0;
 
         await job.save();
     } finally {
@@ -161,7 +161,7 @@ async function insertBatch(batch, job) {
 
             // 2. Handle Errors
             if (error.writeErrors) {
-                job.errors += error.writeErrors.length;
+                job.errorCount += error.writeErrors.length;
 
                 // Log sample for user
                 if (error.writeErrors.length > 0 && job.errorLogs.length < 50) {
@@ -175,12 +175,12 @@ async function insertBatch(batch, job) {
                     postcodeLogger.info(`Batch had ${error.writeErrors.length} duplicates. Successfully inserted: ${nInserted}`);
                 }
             } else {
-                job.errors += (batch.length - nInserted);
+                job.errorCount += (batch.length - nInserted);
                 postcodeLogger.warn(`Batch error 11000 but no writeErrors found. Full error: ${JSON.stringify(error)}`);
             }
         } else {
             // General unexpected error
-            job.errors += batch.length;
+            job.errorCount += batch.length;
             job.errorLogs.push(error.message || 'Unknown batch error');
             postcodeLogger.error(`Batch insert critical failure job ${job._id}: ${error.message}`, { stack: error.stack });
         }

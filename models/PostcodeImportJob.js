@@ -14,7 +14,7 @@ const PostcodeImportJobSchema = new mongoose.Schema({
         type: Number,
         default: 0
     },
-    errors: {
+    errorCount: {
         type: Number,
         default: 0
     },
