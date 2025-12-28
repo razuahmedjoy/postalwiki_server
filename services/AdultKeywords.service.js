@@ -867,6 +867,8 @@ const bulkProcessReferences = async (recordIds, isAdultContent) => {
             throw new Error('No references found with the provided IDs');
         }
 
+        const processedUrls = [];
+
         for (const reference of references) {
             try {
                 if (isAdultContent) {
@@ -897,6 +899,7 @@ const bulkProcessReferences = async (recordIds, isAdultContent) => {
                     }
                 );
 
+                processedUrls.push(reference.url);
                 processed++;
             } catch (error) {
                 adultKeywordsLogger.error(`Error processing reference ${reference._id}:`, error);
@@ -907,7 +910,8 @@ const bulkProcessReferences = async (recordIds, isAdultContent) => {
             totalRecords: recordIds.length,
             processed: processed,
             updated: updated,
-            isAdultContent: isAdultContent
+            isAdultContent: isAdultContent,
+            processedUrls: processedUrls // Log all processed URLs here
         });
 
         return {
