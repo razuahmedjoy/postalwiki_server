@@ -12,19 +12,21 @@ const logger = createLogger({
             level: 'debug' // Ensure console shows all levels
         }),
         new DailyRotateFile({
-            filename: 'logs/app-%DATE%.log',
-            datePattern: 'YYYY-MM-DD',
-            maxSize: '20m', 
-            maxFiles: '14d',
-            dirname: 'logs',
-            level: 'debug' // Ensure file logger shows all levels
-        }),
-        new DailyRotateFile({ // Add separate transport for errors
-            filename: 'logs/error-%DATE%.log',
+            filename: 'logs/app/app-%DATE%.log',
             datePattern: 'YYYY-MM-DD',
             maxSize: '20m',
             maxFiles: '14d',
-            dirname: 'logs',
+            dirname: 'logs/app',
+            auditFile: 'logs/app/audit.json',
+            level: 'debug' // Ensure file logger shows all levels
+        }),
+        new DailyRotateFile({ // Add separate transport for errors
+            filename: 'logs/app/error-%DATE%.log',
+            datePattern: 'YYYY-MM-DD',
+            maxSize: '20m',
+            maxFiles: '14d',
+            dirname: 'logs/app',
+            auditFile: 'logs/app/error-audit.json',
             level: 'error' // Only log errors in this file
         })
     ],

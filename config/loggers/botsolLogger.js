@@ -30,6 +30,7 @@ const botsolLogger = createLogger({
             maxSize: '20m',
             maxFiles: '30d', // Keep logs for 30 days
             dirname: 'logs/botsol',
+            auditFile: 'logs/botsol/audit.json',
             level: 'debug'
         }),
         new DailyRotateFile({
@@ -38,6 +39,7 @@ const botsolLogger = createLogger({
             maxSize: '20m',
             maxFiles: '30d',
             dirname: 'logs/botsol',
+            auditFile: 'logs/botsol/error-audit.json',
             level: 'error'
         })
     ],

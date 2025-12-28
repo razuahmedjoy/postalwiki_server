@@ -4,26 +4,21 @@ node_modules
 # Environment files
 .env
 
-# Log files (but keep logs directory)
-*.log
-logs/*-audit.json
-logs/*/*-audit.json
-logs/*.log
-logs/social_scrape/*.log
-logs/ssUrlLogs/*.log
-logs/ssUrlLogs/*/*.log
-logs/social_scrape-*.log
-logs/social_scrape-error-*.log
+# Log files
+logs/**/*.log
+logs/**/*.json
+logs/**/*.gz
+# Keep the logs directory structure
+!logs/.gitkeep
+!logs/**/.gitkeep
 
-# CSV files in imports
-imports/*.csv
-imports/*/*.csv
+# Imports - Ignore files but keep directories
+imports/*
+!imports/*/
+imports/*/*
+!imports/.gitkeep
+!imports/*/.gitkeep
 
-# Completed directories (all import types)
-imports/social_scrape/completed_*
-imports/social_scrape_blacklisted/completed_*
-imports/social_scrape_phone/completed_*
-imports/*/completed_*
 
 update/
 update/*

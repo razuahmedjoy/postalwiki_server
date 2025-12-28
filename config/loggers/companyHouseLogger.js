@@ -30,6 +30,7 @@ const companyHouseLogger = createLogger({
             maxSize: '20m',
             maxFiles: '30d', // Keep logs for 30 days
             dirname: 'logs/company_house',
+            auditFile: 'logs/company_house/audit.json',
             level: 'debug'
         }),
         new DailyRotateFile({
@@ -38,6 +39,7 @@ const companyHouseLogger = createLogger({
             maxSize: '20m',
             maxFiles: '30d',
             dirname: 'logs/company_house',
+            auditFile: 'logs/company_house/error-audit.json',
             level: 'error'
         })
     ],
