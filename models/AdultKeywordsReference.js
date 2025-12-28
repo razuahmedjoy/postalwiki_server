@@ -7,10 +7,10 @@ const adultKeywordsReferenceSchema = new mongoose.Schema({
   meta_description: String,
   keywords: String,
   matched_keywords: [String], // Array of keywords that matched
-  match_type: { 
-    type: String, 
-    enum: ['exact', 'contains'], 
-    required: true 
+  match_type: {
+    type: String,
+    enum: ['exact', 'contains'],
+    required: true
   },
   csv_source: String, // Source CSV file name
   processed: { type: Boolean, default: false },

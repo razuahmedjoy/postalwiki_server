@@ -19,6 +19,7 @@ router.get('/references', AdultKeywordsController.getReferences);
 router.get('/references/paginated', AdultKeywordsController.getPaginatedReferences);
 
 // Bulk action endpoints
+router.post('/translate', AdultKeywordsController.translateText);
 router.post('/references/bulk-process', AdultKeywordsController.bulkProcessReferences);
 
 module.exports = router; 
