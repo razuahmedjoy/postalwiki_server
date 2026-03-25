@@ -199,38 +199,100 @@ const importSSUrl = async (req, res) => {
                     }
 
                 } catch (error) {
-                    if (error.name === 'BulkWriteError' || error.code === 11000) {
-                        let currentBatchSuccess = 0;
+                    // Normalize bulk write error shapes across Mongo/Mongoose versions.
+                    const isBulkWriteError = error.name === 'BulkWriteError' || error.name === 'MongoBulkWriteError';
+                    const writeErrors = Array.isArray(error.writeErrors)
+                        ? error.writeErrors
+                        : Array.isArray(error.result?.writeErrors)
+                            ? error.result.writeErrors
+                            : [];
+                    let currentBatchSuccess = 0;
+                    let batchDuplicates = 0;
+                    let batchOtherErrors = 0;
+
+                    ssUrlLogger.info('Batch insert error', {
+                        errorName: error.name,
+                        errorCode: error.code,
+                        isBulkWriteError,
+                        writeErrorCount: writeErrors.length,
+                        entriesToInsertCount: entriesToInsert.length
+                    });
+
+                    // If it's a BulkWriteError, process all write errors
+                    if (isBulkWriteError && writeErrors.length > 0) {
+                        // Count successful inserts
                         if (error.result && error.result.nInserted) {
                             currentBatchSuccess = error.result.nInserted;
                         } else if (error.insertedDocs) {
                             currentBatchSuccess = error.insertedDocs.length;
                         }
 
-                        successCount += currentBatchSuccess;
+                        // Count duplicates vs other errors
+                        writeErrors.forEach((writeError, idx) => {
+                            const writeErrorCode = writeError.code
+                                || writeError.err?.code
+                                || writeError.errorResponse?.code
+                                || writeError?.errInfo?.code;
+                            const writeErrorMessage = writeError.errmsg
+                                || writeError.message
+                                || writeError.err?.errmsg
+                                || writeError.err?.message
+                                || writeError.errorResponse?.errmsg
+                                || writeError.errorResponse?.message
+                                || 'Unknown write error';
 
-                        const writeErrors = error.writeErrors || [];
-                        let batchDuplicates = 0;
-
-                        writeErrors.forEach(writeError => {
-                            if (writeError.code === 11000) {
+                            if (writeErrorCode === 11000) {
                                 batchDuplicates++;
-                                // Duplicates are expected, we don't log them as technical errors in the error log to avoid noise, 
-                                // unless user explicitly asked for "error reason". The user said "if same url and image exist... should not be inserted",
-                                // implying this is normal business logic, not a system failure.
                             } else {
-                                const msg = `DB Error: ${writeError.errmsg || writeError.message}`;
+                                batchOtherErrors++;
+                                const msg = `DB Error: ${writeErrorMessage}`;
                                 errorMessages.push(msg);
-                                ssUrlLogger.error('Database Write Error', { reason: msg });
+                                ssUrlLogger.error('Database Write Error', {
+                                    reason: msg,
+                                    writeErrorIndex: idx,
+                                    writeErrorCode,
+                                    writeError
+                                });
                             }
                         });
-                        duplicateCount += batchDuplicates;
-
-                    } else {
+                    } 
+                    // If it's a single duplicate error (not BulkWriteError)
+                    else if (error.code === 11000) {
+                        // When single duplicate error is thrown for unordered inserts,
+                        // treat remaining failed rows as duplicates for accurate stats.
+                        batchDuplicates = Math.max(1, entriesToInsert.length - currentBatchSuccess);
+                    } 
+                    // Unknown error
+                    else {
+                        // Some driver versions surface duplicate details under keyPattern/keyValue.
+                        if (error.keyPattern && (error.keyPattern.url === 1 || error.keyPattern.image === 1)) {
+                            batchDuplicates = Math.max(1, entriesToInsert.length - currentBatchSuccess);
+                        } else {
+                            batchOtherErrors = entriesToInsert.length;
+                        }
                         const msg = `Database error: ${error.message}`;
                         errorMessages.push(msg);
-                        ssUrlLogger.error('Database Fatal Error', { reason: msg });
+                        ssUrlLogger.error('Database Fatal Error', { 
+                            reason: msg, 
+                            errorName: error.name,
+                            errorCode: error.code,
+                            writeErrorCount: writeErrors.length,
+                            keyPattern: error.keyPattern,
+                            keyValue: error.keyValue
+                        });
                     }
+
+                    ssUrlLogger.info('Batch insert result', {
+                        currentBatchSuccess,
+                        batchDuplicates,
+                        batchOtherErrors,
+                        totalSuccessCount: successCount + currentBatchSuccess,
+                        totalDuplicateCount: duplicateCount + batchDuplicates
+                    });
+
+                    successCount += currentBatchSuccess;
+                    duplicateCount += batchDuplicates;
+                    errorsCount += batchOtherErrors;
                 }
                 entriesToInsert.length = 0;
             }
@@ -239,8 +301,12 @@ const importSSUrl = async (req, res) => {
             await new Promise(resolve => setTimeout(resolve, 10));
         }
 
-        errorsCount = totalCount - successCount - notFoundCount - duplicateCount;
-        if (errorsCount < 0) errorsCount = 0;
+        // Calculate errors as records that weren't successful, notFound, or duplicates
+        // Only do this for records counted in totalCount but not accounted for elsewhere
+        const accounted = successCount + notFoundCount + duplicateCount + errorsCount;
+        if (accounted < totalCount) {
+            errorsCount += (totalCount - accounted);
+        }
 
         return res.json({
             status: (successCount > 0 || duplicateCount > 0) ? 1 : 0,
