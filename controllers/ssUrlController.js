@@ -3,6 +3,8 @@ const axios = require('axios');
 const ssUrlLogger = require("../config/loggers/ssUrlLogger");
 const https = require('https');
 
+let indexSyncPromise = null;
+
 // Create an HTTPS agent for connection pooling
 const httpsAgent = new https.Agent({
     keepAlive: true,
@@ -37,6 +39,39 @@ const checkImageWithRetry = async (url, retries = 3) => {
     }
 };
 
+const escapeRegex = (value = '') => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const ensureSSUrlIndexes = async () => {
+    if (indexSyncPromise) {
+        return indexSyncPromise;
+    }
+
+    indexSyncPromise = (async () => {
+        const indexes = await ScreenshotUrl.collection.indexes();
+        const imageUniqueIndex = indexes.find(index =>
+            index.unique === true &&
+            index.key &&
+            index.key.image === 1 &&
+            Object.keys(index.key).length === 1
+        );
+
+        if (imageUniqueIndex) {
+            await ScreenshotUrl.collection.dropIndex(imageUniqueIndex.name);
+        }
+
+        await ScreenshotUrl.collection.createIndex(
+            { url: 1, image: 1 },
+            { unique: true, background: true, name: 'url_1_image_1' }
+        );
+    })();
+
+    try {
+        await indexSyncPromise;
+    } finally {
+        indexSyncPromise = null;
+    }
+};
+
 const importSSUrl = async (req, res) => {
     try {
         const { chunk, bucketName } = req.body;
@@ -57,6 +92,8 @@ const importSSUrl = async (req, res) => {
         // Set a significantly longer timeout for this route
         req.setTimeout(300000); // 5 minutes timeout
 
+        await ensureSSUrlIndexes();
+
         let totalCount = 0;
         let successCount = 0;
         let errorsCount = 0;
@@ -66,7 +103,7 @@ const importSSUrl = async (req, res) => {
         let resultDebug = [];
 
         const entriesToInsert = [];
-        const processedUrls = new Set();
+        const processedUrlImageKeys = new Set();
 
         // Optimizing Batch Size for Speed
         const BATCH_SIZE = 50;
@@ -96,14 +133,16 @@ const importSSUrl = async (req, res) => {
                     return;
                 }
 
-                if (processedUrls.has(url)) {
-                    duplicateCount++; // Tracking internal duplicates in chunk
-                    return;
-                }
-                processedUrls.add(url);
-
                 try {
                     const imageUrl = `https://h1m7.c11.e2-4.dev/${bucketName}/${image}`;
+                    const imagePath = `${bucketName}/${image}`;
+                    const compositeKey = `${url}__${imagePath}`;
+
+                    if (processedUrlImageKeys.has(compositeKey)) {
+                        duplicateCount++; // Tracking internal duplicates in chunk by url+image
+                        return;
+                    }
+                    processedUrlImageKeys.add(compositeKey);
 
                     const response = await checkImageWithRetry(imageUrl);
 
@@ -126,7 +165,7 @@ const importSSUrl = async (req, res) => {
 
                     entriesToInsert.push({
                         url,
-                        image: `${bucketName}/${image}`
+                        image: imagePath
                     });
 
                 } catch (error) {
@@ -238,6 +277,56 @@ const totalCount = async (req, res) => {
     });
 }
 
+const searchSSUrls = async (req, res) => {
+    const { url = '', image = '', page = 1, limit = 500 } = req.body || {};
+
+    try {
+        const query = {};
+
+        if (url && String(url).trim()) {
+            query.url = { $regex: escapeRegex(String(url).trim()), $options: 'i' };
+        }
+
+        if (image && String(image).trim()) {
+            query.image = { $regex: escapeRegex(String(image).trim()), $options: 'i' };
+        }
+
+        const pageNum = Math.max(1, parseInt(page, 10) || 1);
+        const limitNum = Math.min(1000, Math.max(1, parseInt(limit, 10) || 500));
+        const skip = (pageNum - 1) * limitNum;
+
+        const countPromise = Object.keys(query).length === 0
+            ? ScreenshotUrl.estimatedDocumentCount()
+            : ScreenshotUrl.countDocuments(query);
+
+        const [total, data] = await Promise.all([
+            countPromise,
+            ScreenshotUrl.find(query)
+                .sort({ _id: 1 })
+                .skip(skip)
+                .limit(limitNum)
+                .select({ _id: 1, url: 1, image: 1 })
+                .lean()
+        ]);
+
+        return res.status(200).json({
+            success: true,
+            count: data.length,
+            total,
+            page: pageNum,
+            totalPages: Math.max(1, Math.ceil(total / limitNum)),
+            data
+        });
+    } catch (error) {
+        ssUrlLogger.error('SS URL search failed', { reason: error.message, stack: error.stack });
+        return res.status(500).json({
+            success: false,
+            message: 'Search failed',
+            error: error.message
+        });
+    }
+}
+
 
 const dropAll = async (req, res) => {
     try {
@@ -252,5 +341,6 @@ const dropAll = async (req, res) => {
 module.exports = {
     importSSUrl,
     dropAll,
-    totalCount
+    totalCount,
+    searchSSUrls
 }
