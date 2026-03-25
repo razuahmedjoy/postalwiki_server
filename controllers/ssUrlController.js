@@ -186,7 +186,7 @@ const importSSUrl = async (req, res) => {
                 try {
                     const result = await ScreenshotUrl.insertMany(entriesToInsert, {
                         ordered: false,
-                        writeConcern: { w: 0 }
+                        writeConcern: { w: 1 }
                     });
                     successCount += result.length;
 
