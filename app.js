@@ -12,6 +12,7 @@ const socialScrapeRoutes = require('./routes/socialScrapeRoutes');
 const adultKeywordsRoutes = require('./routes/adultKeywordsRoutes');
 const companyHouseRoutes = require('./routes/companyHouseRoutes');
 const postcodeDistrictRoutes = require('./routes/postcodeDistrictRoutes');
+const rmAddressRoutes = require('./routes/rmAddressRoutes');
 const app = express();
 
 // Body parser - Move this before security middleware
@@ -85,6 +86,7 @@ app.use('/api/botsol', verifyToken, authorizeRoles('admin'), botsolRoutes);
 app.use('/api/adult-keywords', verifyToken, authorizeRoles('admin'), adultKeywordsRoutes);
 app.use('/api/company-house', verifyToken, authorizeRoles('admin'), companyHouseRoutes);
 app.use('/api/postcode-district', verifyToken, authorizeRoles('admin'), postcodeDistrictRoutes);
+app.use('/api/rm-address', verifyToken, authorizeRoles('admin'), rmAddressRoutes);
 
 // ✅ admin-only route example
 app.get('/admin', verifyToken, authorizeRoles('admin'), (req, res) => {
