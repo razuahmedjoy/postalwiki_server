@@ -159,10 +159,14 @@ const getPaginatedAddresses = async (req, res) => {
     try {
         const page = parseInt(req.query.page, 10) || 1;
         const limit = parseInt(req.query.limit, 10) || 200;
+        const useCursor = req.query.useCursor !== 'false';
+        const cursor = req.query.cursor ? String(req.query.cursor) : null;
 
         const { rows, pagination } = await RMAddressService.getPaginatedAddresses({
             page,
             limit,
+            useCursor,
+            cursor,
             searchPostcode: req.query.searchPostcode || '',
             searchDistrict: req.query.searchDistrict || '',
             searchAddress: req.query.searchAddress || ''

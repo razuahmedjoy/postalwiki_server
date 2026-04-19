@@ -15,5 +15,7 @@ const addressMasterMergedSchema = new mongoose.Schema({
 });
 
 addressMasterMergedSchema.index({ postcode: 1, address: 1 }, { background: true });
+addressMasterMergedSchema.index({ postcode: 1, _id: 1 }, { background: true });
+addressMasterMergedSchema.index({ district: 1, _id: 1 }, { background: true });
 
 module.exports = mongoose.model('AddressMasterMerged', addressMasterMergedSchema);

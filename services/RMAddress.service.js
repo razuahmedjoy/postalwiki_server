@@ -1,6 +1,7 @@
 const { parse } = require('csv-parse');
 const fs = require('fs');
 const path = require('path');
+const mongoose = require('mongoose');
 
 const AddressMasterMerged = require('../models/AddressMasterMerged');
 const PostcodeDistrict = require('../models/PostcodeDistrict');
@@ -366,35 +367,81 @@ const getStats = async () => {
     };
 };
 
-const getPaginatedAddresses = async ({ page, limit, searchPostcode, searchDistrict, searchAddress }) => {
+const getPaginatedAddresses = async ({ page, limit, searchPostcode, searchDistrict, searchAddress, useCursor = true, cursor = null }) => {
     const safePage = Number.isFinite(page) && page > 0 ? page : 1;
     const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 1000) : 200;
     const skip = (safePage - 1) * safeLimit;
 
     const query = {};
 
-    if (searchPostcode) {
-        query.postcode = { $regex: searchPostcode, $options: 'i' };
+    const trimmedPostcode = (searchPostcode || '').trim();
+    const trimmedDistrict = (searchDistrict || '').trim();
+    const trimmedAddress = (searchAddress || '').trim();
+
+    if (trimmedPostcode) {
+        query.postcode = { $regex: `^${escapeRegex(trimmedPostcode)}`, $options: 'i' };
     }
 
-    if (searchDistrict) {
-        query.district = { $regex: searchDistrict, $options: 'i' };
+    if (trimmedDistrict) {
+        query.district = { $regex: `^${escapeRegex(trimmedDistrict)}`, $options: 'i' };
     }
 
-    if (searchAddress) {
-        query.address = { $regex: searchAddress, $options: 'i' };
+    if (trimmedAddress) {
+        query.address = { $regex: escapeRegex(trimmedAddress), $options: 'i' };
     }
 
-    const [rows, total] = await Promise.all([
-        AddressMasterMerged.find(query)
-            .sort({ postcode: 1, _id: 1 })
-            .skip(skip)
-            .limit(safeLimit)
-            .lean(),
-        Object.keys(query).length > 0
-            ? AddressMasterMerged.countDocuments(query)
-            : AddressMasterMerged.estimatedDocumentCount()
-    ]);
+    let rows = [];
+    let pagination;
+
+    if (useCursor) {
+        const cursorQuery = { ...query };
+        if (cursor && mongoose.isValidObjectId(cursor)) {
+            cursorQuery._id = { $gt: cursor };
+        }
+
+        const cursorRows = await AddressMasterMerged.find(cursorQuery)
+            .select({ postcode: 1, district: 1, address: 1, dateCreated: 1, correctionVersion: 1, exceptionVersion: 1 })
+            .sort({ _id: 1 })
+            .limit(safeLimit + 1)
+            .lean();
+
+        const hasNextPage = cursorRows.length > safeLimit;
+        rows = hasNextPage ? cursorRows.slice(0, safeLimit) : cursorRows;
+        const nextCursor = hasNextPage ? String(rows[rows.length - 1]?._id || '') : null;
+
+        pagination = {
+            mode: 'cursor',
+            limit: safeLimit,
+            hasNextPage,
+            nextCursor,
+            total: null,
+            totalPages: null,
+            page: null
+        };
+    } else {
+        const [offsetRows, total] = await Promise.all([
+            AddressMasterMerged.find(query)
+                .select({ postcode: 1, district: 1, address: 1, dateCreated: 1, correctionVersion: 1, exceptionVersion: 1 })
+                .sort({ _id: 1 })
+                .skip(skip)
+                .limit(safeLimit)
+                .lean(),
+            Object.keys(query).length > 0
+                ? AddressMasterMerged.countDocuments(query)
+                : AddressMasterMerged.estimatedDocumentCount()
+        ]);
+
+        rows = offsetRows;
+        pagination = {
+            mode: 'offset',
+            page: safePage,
+            limit: safeLimit,
+            total,
+            totalPages: Math.ceil(total / safeLimit),
+            hasNextPage: safePage * safeLimit < total,
+            nextCursor: rows.length ? String(rows[rows.length - 1]?._id || '') : null
+        };
+    }
 
     const mappedRows = rows.map((row) => {
         let addressText = row.address;
@@ -417,12 +464,7 @@ const getPaginatedAddresses = async ({ page, limit, searchPostcode, searchDistri
 
     return {
         rows: mappedRows,
-        pagination: {
-            page: safePage,
-            limit: safeLimit,
-            total,
-            totalPages: Math.ceil(total / safeLimit)
-        }
+        pagination
     };
 };
 
