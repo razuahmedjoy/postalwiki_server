@@ -327,6 +327,37 @@ const getImportFiles = async () => {
     return csvFiles.slice(0, MAX_FILES_PER_RUN);
 };
 
+const getImportFileDetails = async () => {
+    await ensureImportDirectory();
+
+    const entries = await fs.promises.readdir(IMPORT_DIR, { withFileTypes: true });
+    const csvEntries = entries
+        .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.csv'))
+        .slice(0, MAX_FILES_PER_RUN);
+
+    const detailedFiles = await Promise.all(
+        csvEntries.map(async (entry) => {
+            const fullPath = path.join(IMPORT_DIR, entry.name);
+            const stats = await fs.promises.stat(fullPath);
+
+            return {
+                filename: entry.name,
+                sizeBytes: stats.size,
+                lastModified: stats.mtime.toISOString(),
+                status: 'pending'
+            };
+        })
+    );
+
+    detailedFiles.sort((a, b) => a.filename.localeCompare(b.filename));
+
+    return {
+        files: detailedFiles,
+        pendingCount: detailedFiles.length,
+        importEnabled: detailedFiles.length > 0
+    };
+};
+
 const getStats = async () => {
     const addressMasterMergedCount = await AddressMasterMerged.estimatedDocumentCount();
 
@@ -399,6 +430,7 @@ module.exports = {
     RMAddressService: {
         processFile,
         getImportFiles,
+        getImportFileDetails,
         getStats,
         getPaginatedAddresses,
         getImportProgress: () => ({ ...importProgressTracker }),

@@ -1,4 +1,5 @@
 const path = require('path');
+const fs = require('fs');
 const { RMAddressService, IMPORT_DIR } = require('../services/RMAddress.service');
 const rmAddressLogger = require('../config/loggers/rmAddressLogger');
 
@@ -97,6 +98,63 @@ const getStats = async (req, res) => {
     }
 };
 
+const listImportFiles = async (req, res) => {
+    try {
+        const data = await RMAddressService.getImportFileDetails();
+        return res.json({ success: true, data });
+    } catch (error) {
+        rmAddressLogger.error(`Error listing RM Address import files: ${error.message}`);
+        return res.status(500).json({ success: false, error: 'Failed to list import files' });
+    }
+};
+
+const uploadImportFiles = async (req, res) => {
+    try {
+        const files = req.files || [];
+
+        if (!files.length) {
+            return res.status(400).json({
+                success: false,
+                message: 'No CSV files were uploaded.'
+            });
+        }
+
+        const uploadedFiles = files.map((file) => ({
+            filename: file.filename,
+            originalName: file.originalname,
+            sizeBytes: file.size
+        }));
+
+        rmAddressLogger.info(`Uploaded ${uploadedFiles.length} RM Address file(s)`);
+
+        const pending = await RMAddressService.getImportFileDetails();
+
+        return res.json({
+            success: true,
+            message: 'CSV file(s) uploaded successfully.',
+            uploadedFiles,
+            data: pending
+        });
+    } catch (error) {
+        rmAddressLogger.error(`Error uploading RM Address files: ${error.message}`);
+
+        if (Array.isArray(req.files)) {
+            await Promise.all(
+                req.files.map(async (file) => {
+                    if (!file?.path) return;
+                    try {
+                        await fs.promises.unlink(file.path);
+                    } catch (cleanupError) {
+                        rmAddressLogger.warn(`Failed to cleanup uploaded file ${file.path}: ${cleanupError.message}`);
+                    }
+                })
+            );
+        }
+
+        return res.status(500).json({ success: false, error: 'Failed to upload CSV files' });
+    }
+};
+
 const getPaginatedAddresses = async (req, res) => {
     try {
         const page = parseInt(req.query.page, 10) || 1;
@@ -148,6 +206,8 @@ module.exports = {
         startImport,
         getImportProgress,
         getStats,
+        listImportFiles,
+        uploadImportFiles,
         getPaginatedAddresses,
         stopImport
     }
