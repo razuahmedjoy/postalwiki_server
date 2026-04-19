@@ -51,7 +51,8 @@ jobs:
           port: 22
           source: deploy/
           target: /home/dev/api.socialwiki.co.uk
-          rm: true
+          rm: false
+          debug: true
 
       # 4️⃣ Create production .env on server
       - name: Create production .env on server
