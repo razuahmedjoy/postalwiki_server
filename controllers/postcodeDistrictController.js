@@ -4,6 +4,26 @@ const postcodeLogger = require('../config/loggers/postcodeDistrictLogger');
 const fs = require('fs');
 const { parse } = require('csv-parse');
 
+const normalizePostcode = (value) => {
+    if (!value) return '';
+
+    const compact = value
+        .toString()
+        .trim()
+        .toUpperCase()
+        .replace(/\s+/g, ' ')
+        .replace(/[^A-Z0-9 ]/g, '');
+
+    if (!compact) return '';
+
+    const noSpace = compact.replace(/\s+/g, '');
+    if (noSpace.length > 3) {
+        return `${noSpace.slice(0, noSpace.length - 3)} ${noSpace.slice(noSpace.length - 3)}`;
+    }
+
+    return compact;
+};
+
 // Start Import Job
 exports.startImportJob = async (req, res) => {
     try {
@@ -280,5 +300,67 @@ exports.deleteEntry = async (req, res) => {
     } catch (error) {
         postcodeLogger.error(`Deletion failed: ${error.message}`);
         res.status(500).json({ message: 'Deletion failed' });
+    }
+};
+
+// Check list of postcodes and report which are missing
+exports.checkPostcodes = async (req, res) => {
+    try {
+        const inputPostcodes = Array.isArray(req.body?.postcodes) ? req.body.postcodes : [];
+
+        if (!inputPostcodes.length) {
+            return res.status(400).json({
+                success: false,
+                message: 'Please provide at least one postcode.'
+            });
+        }
+
+        if (inputPostcodes.length > 500) {
+            return res.status(400).json({
+                success: false,
+                message: 'Maximum 500 postcodes are allowed per check.'
+            });
+        }
+
+        const normalized = inputPostcodes
+            .map((item) => normalizePostcode(item))
+            .filter(Boolean);
+
+        const uniquePostcodes = Array.from(new Set(normalized));
+
+        if (!uniquePostcodes.length) {
+            return res.status(400).json({
+                success: false,
+                message: 'No valid postcodes found after normalization.'
+            });
+        }
+
+        // Uses exact match on indexed postcode field for high performance.
+        const foundDocs = await PostcodeDistrict.find(
+            { postcode: { $in: uniquePostcodes } },
+            { _id: 0, postcode: 1 }
+        ).lean();
+
+        const foundSet = new Set(foundDocs.map((doc) => doc.postcode));
+        const missingPostcodes = uniquePostcodes.filter((postcode) => !foundSet.has(postcode));
+
+        return res.status(200).json({
+            success: true,
+            data: {
+                inputCount: inputPostcodes.length,
+                normalizedCount: normalized.length,
+                uniqueCount: uniquePostcodes.length,
+                foundCount: uniquePostcodes.length - missingPostcodes.length,
+                missingCount: missingPostcodes.length,
+                missingPostcodes
+            }
+        });
+    } catch (error) {
+        postcodeLogger.error(`Check postcodes failed: ${error.message}`);
+        return res.status(500).json({
+            success: false,
+            message: 'Postcode check failed',
+            error: error.message
+        });
     }
 };

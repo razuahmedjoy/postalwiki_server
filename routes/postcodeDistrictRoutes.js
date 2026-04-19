@@ -40,6 +40,7 @@ router.get('/import/status/:jobId', postcodeController.getImportStatus);
 
 // CRUD Routes
 router.post('/search', postcodeController.searchPostcodes);
+router.post('/check-postcodes', postcodeController.checkPostcodes);
 router.post('/create', postcodeController.createEntry);
 router.put('/:id', postcodeController.updateEntry);
 router.delete('/:id', postcodeController.deleteEntry);
