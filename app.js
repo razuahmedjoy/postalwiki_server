@@ -13,6 +13,7 @@ const adultKeywordsRoutes = require('./routes/adultKeywordsRoutes');
 const companyHouseRoutes = require('./routes/companyHouseRoutes');
 const postcodeDistrictRoutes = require('./routes/postcodeDistrictRoutes');
 const rmAddressRoutes = require('./routes/rmAddressRoutes');
+const propPriceRoutes = require('./routes/propPriceRoutes');
 const app = express();
 
 // Body parser - Move this before security middleware
@@ -87,6 +88,7 @@ app.use('/api/adult-keywords', verifyToken, authorizeRoles('admin'), adultKeywor
 app.use('/api/company-house', verifyToken, authorizeRoles('admin'), companyHouseRoutes);
 app.use('/api/postcode-district', verifyToken, authorizeRoles('admin'), postcodeDistrictRoutes);
 app.use('/api/rm-address', verifyToken, authorizeRoles('admin'), rmAddressRoutes);
+app.use('/api/prop-price', verifyToken, authorizeRoles('admin'), propPriceRoutes);
 
 // ✅ admin-only route example
 app.get('/admin', verifyToken, authorizeRoles('admin'), (req, res) => {
