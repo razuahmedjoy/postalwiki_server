@@ -2,7 +2,15 @@ const PostcodeDistrict = require('../models/PostcodeDistrict');
 const PostcodeImportJob = require('../models/PostcodeImportJob');
 const postcodeLogger = require('../config/loggers/postcodeDistrictLogger');
 const fs = require('fs');
+const path = require('path');
 const { parse } = require('csv-parse');
+
+const CHECK_IMPORT_DIR = path.join(__dirname, '../imports/postcode_check');
+const CHECK_RESULT_DIR = path.join(CHECK_IMPORT_DIR, 'results');
+const CHECK_BATCH_SIZE = 10000;
+const CHECK_SAMPLE_LIMIT = 100;
+
+const activeCheckJobs = new Map();
 
 const normalizePostcode = (value) => {
     if (!value) return '';
@@ -22,6 +30,43 @@ const normalizePostcode = (value) => {
     }
 
     return compact;
+};
+
+const cleanText = (value) => {
+    if (!value) return '';
+
+    return value
+        .toString()
+        .replace(/[\u0000-\u001F\u007F-\u009F]/g, '')
+        .trim();
+};
+
+const ensureCheckDirectories = async () => {
+    await fs.promises.mkdir(CHECK_RESULT_DIR, { recursive: true });
+};
+
+const escapeCsvCell = (value) => {
+    const text = value === null || value === undefined ? '' : value.toString();
+    return `"${text.replace(/"/g, '""')}"`;
+};
+
+const readJobState = (jobId) => {
+    const key = jobId.toString();
+    if (!activeCheckJobs.has(key)) {
+        activeCheckJobs.set(key, { stopRequested: false });
+    }
+
+    return activeCheckJobs.get(key);
+};
+
+const pushErrorLog = (job, message) => {
+    if (!job.errorLogs) {
+        job.errorLogs = [];
+    }
+
+    if (job.errorLogs.length < 50) {
+        job.errorLogs.push(message);
+    }
 };
 
 // Start Import Job
@@ -362,5 +407,316 @@ exports.checkPostcodes = async (req, res) => {
             message: 'Postcode check failed',
             error: error.message
         });
+    }
+};
+
+exports.startCheckJob = async (req, res) => {
+    try {
+        const job = await PostcodeImportJob.create({
+            jobType: 'check',
+            status: 'pending',
+            stage: 'queued'
+        });
+
+        readJobState(job._id);
+
+        postcodeLogger.info(`Started postcode check job: ${job._id}`);
+        return res.status(200).json({ success: true, jobId: job._id });
+    } catch (error) {
+        postcodeLogger.error(`Error starting postcode check job: ${error.message}`);
+        return res.status(500).json({ success: false, message: 'Failed to start postcode check job' });
+    }
+};
+
+exports.uploadAndProcessCheckFile = async (req, res) => {
+    const { jobId } = req.params;
+
+    if (!req.file) {
+        return res.status(400).json({ success: false, message: 'No CSV file uploaded' });
+    }
+
+    try {
+        res.status(202).json({ success: true, message: 'File accepted for background processing' });
+
+        const job = await PostcodeImportJob.findById(jobId);
+        if (!job) {
+            postcodeLogger.warn(`Check job ${jobId} not found, deleting uploaded file.`);
+            await fs.promises.unlink(req.file.path).catch(() => undefined);
+            return;
+        }
+
+        const state = readJobState(jobId);
+        state.stopRequested = false;
+
+        job.jobType = 'check';
+        job.status = 'processing';
+        job.stage = 'reading';
+        job.inputFileName = req.file.originalname;
+        job.stopRequested = false;
+        job.totalProcessed = 0;
+        job.inputCount = 0;
+        job.uniqueCount = 0;
+        job.foundCount = 0;
+        job.missingCount = 0;
+        job.insertedCount = 0;
+        job.errorCount = 0;
+        job.sampleMissingPostcodes = [];
+        job.errorLogs = [];
+        job.resultFileName = '';
+        job.resultFilePath = '';
+        await job.save();
+
+        processCheckCsvFile(req.file.path, jobId).catch(async (error) => {
+            postcodeLogger.error(`Check job ${jobId} failed: ${error.message}`);
+            try {
+                const failedJob = await PostcodeImportJob.findById(jobId);
+                if (failedJob) {
+                    failedJob.status = 'failed';
+                    failedJob.stage = 'failed';
+                    failedJob.stopRequested = false;
+                    pushErrorLog(failedJob, error.message);
+                    await failedJob.save();
+                }
+            } catch (saveError) {
+                postcodeLogger.error(`Failed to persist check job failure ${jobId}: ${saveError.message}`);
+            }
+        });
+    } catch (error) {
+        postcodeLogger.error(`Error starting check upload for ${jobId}: ${error.message}`);
+        return res.status(500).json({ success: false, message: 'Failed to start postcode check processing' });
+    }
+};
+
+const processCheckCsvFile = async (filePath, jobId) => {
+    await ensureCheckDirectories();
+
+    const job = await PostcodeImportJob.findById(jobId);
+    if (!job) {
+        await fs.promises.unlink(filePath).catch(() => undefined);
+        return;
+    }
+
+    const state = readJobState(jobId);
+    const resultFileName = `postcode_missing_${jobId}_${Date.now()}.csv`;
+    const resultFilePath = path.join(CHECK_RESULT_DIR, resultFileName);
+    const resultStream = fs.createWriteStream(resultFilePath, { encoding: 'utf8' });
+
+    resultStream.write('postcode\n');
+
+    const stream = fs.createReadStream(filePath, { highWaterMark: 1024 * 1024 }).pipe(parse({
+        columns: false,
+        skip_empty_lines: true,
+        trim: true,
+        relax_column_count: true,
+        relax_quotes: true
+    }));
+
+    const seenPostcodes = new Set();
+    let pendingPostcodes = [];
+    let inputCount = 0;
+    let uniqueCount = 0;
+    let foundCount = 0;
+    let missingCount = 0;
+    let invalidCount = 0;
+    const sampleMissingPostcodes = [];
+
+    const saveProgress = async () => {
+        job.totalProcessed = inputCount;
+        job.inputCount = inputCount;
+        job.uniqueCount = uniqueCount;
+        job.foundCount = foundCount;
+        job.missingCount = missingCount;
+        job.insertedCount = foundCount;
+        job.errorCount = invalidCount;
+        job.sampleMissingPostcodes = sampleMissingPostcodes;
+        job.resultFileName = resultFileName;
+        job.resultFilePath = resultFilePath;
+        await job.save();
+    };
+
+    const writeResultLine = async (postcode) => {
+        if (resultStream.write(`${escapeCsvCell(postcode)}\n`)) {
+            return;
+        }
+
+        await new Promise((resolve) => resultStream.once('drain', resolve));
+    };
+
+    const flushPending = async () => {
+        if (!pendingPostcodes.length) {
+            return;
+        }
+
+        job.stage = 'checking';
+        const foundDocs = await PostcodeDistrict.find(
+            { postcode: { $in: pendingPostcodes } },
+            { _id: 0, postcode: 1 }
+        ).lean();
+
+        const foundSet = new Set(foundDocs.map((doc) => normalizePostcode(doc.postcode)));
+        let chunkFound = 0;
+        let chunkMissing = 0;
+
+        for (const postcode of pendingPostcodes) {
+            if (foundSet.has(postcode)) {
+                chunkFound += 1;
+                continue;
+            }
+
+            chunkMissing += 1;
+            if (sampleMissingPostcodes.length < CHECK_SAMPLE_LIMIT) {
+                sampleMissingPostcodes.push(postcode);
+            }
+
+            await writeResultLine(postcode);
+        }
+
+        foundCount += chunkFound;
+        missingCount += chunkMissing;
+        pendingPostcodes = [];
+
+        job.stage = 'writing';
+        await saveProgress();
+    };
+
+    try {
+        for await (const record of stream) {
+            inputCount += 1;
+
+            if (state.stopRequested) {
+                postcodeLogger.warn(`Stop requested for postcode check job ${jobId}`);
+                break;
+            }
+
+            if (!Array.isArray(record) || record.length === 0) {
+                invalidCount += 1;
+                continue;
+            }
+
+            const rawPostcode = cleanText(record[0]);
+
+            if (!rawPostcode) {
+                invalidCount += 1;
+                continue;
+            }
+
+            if (rawPostcode.toLowerCase() === 'postcode') {
+                continue;
+            }
+
+            const postcode = normalizePostcode(rawPostcode);
+            if (!postcode) {
+                invalidCount += 1;
+                continue;
+            }
+
+            if (seenPostcodes.has(postcode)) {
+                continue;
+            }
+
+            seenPostcodes.add(postcode);
+            uniqueCount += 1;
+            pendingPostcodes.push(postcode);
+
+            if (inputCount % 5000 === 0) {
+                job.stage = pendingPostcodes.length ? 'checking' : 'reading';
+                await saveProgress();
+            }
+
+            if (pendingPostcodes.length >= CHECK_BATCH_SIZE) {
+                await flushPending();
+            }
+        }
+
+        await flushPending();
+
+        await new Promise((resolve, reject) => {
+            resultStream.end(() => resolve());
+            resultStream.on('error', reject);
+        });
+
+        const finalStatus = state.stopRequested ? 'stopped' : 'completed';
+        job.status = finalStatus;
+        job.stage = finalStatus;
+        job.stopRequested = false;
+        if (finalStatus === 'completed') {
+            job.completedAt = new Date();
+        }
+        await saveProgress();
+
+        postcodeLogger.info(`Postcode check job ${jobId} finished with status=${finalStatus}, input=${inputCount}, unique=${uniqueCount}, found=${foundCount}, missing=${missingCount}, invalid=${invalidCount}`);
+    } catch (error) {
+        try {
+            resultStream.destroy();
+        } catch (streamError) {
+            postcodeLogger.warn(`Failed to destroy result stream for job ${jobId}: ${streamError.message}`);
+        }
+
+        job.status = 'failed';
+        job.stage = 'failed';
+        job.stopRequested = false;
+        pushErrorLog(job, error.message);
+        await job.save();
+        throw error;
+    } finally {
+        activeCheckJobs.delete(jobId.toString());
+        await fs.promises.unlink(filePath).catch(() => undefined);
+    }
+};
+
+exports.getCheckStatus = async (req, res) => {
+    try {
+        const job = await PostcodeImportJob.findById(req.params.jobId).lean();
+        if (!job) {
+            return res.status(404).json({ success: false, message: 'Job not found' });
+        }
+
+        return res.status(200).json({ success: true, data: job });
+    } catch (error) {
+        postcodeLogger.error(`Error getting postcode check status: ${error.message}`);
+        return res.status(500).json({ success: false, message: 'Failed to fetch postcode check status' });
+    }
+};
+
+exports.stopCheckJob = async (req, res) => {
+    try {
+        const job = await PostcodeImportJob.findById(req.params.jobId);
+        if (!job) {
+            return res.status(404).json({ success: false, message: 'Job not found' });
+        }
+
+        job.stopRequested = true;
+        if (job.status === 'pending') {
+            job.status = 'stopped';
+            job.stage = 'stopped';
+        }
+        await job.save();
+
+        const state = readJobState(job._id);
+        state.stopRequested = true;
+
+        postcodeLogger.info(`Stop requested for postcode check job ${job._id}`);
+        return res.status(200).json({ success: true, message: 'Stop requested' });
+    } catch (error) {
+        postcodeLogger.error(`Error stopping postcode check job: ${error.message}`);
+        return res.status(500).json({ success: false, message: 'Failed to stop postcode check job' });
+    }
+};
+
+exports.downloadCheckResult = async (req, res) => {
+    try {
+        const job = await PostcodeImportJob.findById(req.params.jobId).lean();
+        if (!job) {
+            return res.status(404).json({ success: false, message: 'Job not found' });
+        }
+
+        if (!job.resultFilePath || !fs.existsSync(job.resultFilePath)) {
+            return res.status(404).json({ success: false, message: 'Result file not available yet' });
+        }
+
+        return res.download(job.resultFilePath, job.resultFileName || path.basename(job.resultFilePath));
+    } catch (error) {
+        postcodeLogger.error(`Error downloading postcode check result: ${error.message}`);
+        return res.status(500).json({ success: false, message: 'Failed to download postcode check result' });
     }
 };

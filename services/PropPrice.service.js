@@ -126,15 +126,15 @@ const parseDeedDate = (value) => {
     return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
-const formatDateYYMMDD = (value) => {
+const formatDateDDMMYYYY = (value) => {
     if (!value) return '-';
     const date = value instanceof Date ? value : new Date(value);
     if (Number.isNaN(date.getTime())) return '-';
 
-    const year = String(date.getFullYear()).slice(-2);
+    const year = String(date.getFullYear());
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
-    return `${year}/${month}/${day}`;
+    return `${day}/${month}/${year}`;
 };
 
 const formatMoney = (value) => {
@@ -144,8 +144,12 @@ const formatMoney = (value) => {
     return `£${numberValue.toLocaleString('en-GB')}`;
 };
 
-const buildAddressDisplay = ({ saon, paon, street }) => {
-    return [cleanText(saon), cleanText(paon), cleanText(street)].filter(Boolean).join(', ');
+const buildAddressDisplay = ({ saon, paon, street, locality, town, district, county }) => {
+    const parts = [saon, paon, street, locality, town, district, county]
+        .map((value) => cleanText(value))
+        .filter(Boolean);
+
+    return Array.from(new Set(parts)).join(', ');
 };
 
 const flushBatch = async (docs, filename) => {
@@ -283,7 +287,11 @@ const processFile = async (filePath) => {
         const saon = cleanText(record[7]);
         const paon = cleanText(record[8]);
         const street = cleanText(record[9]);
-        const addressDisplay = buildAddressDisplay({ saon, paon, street });
+        const locality = cleanText(record[10]);
+        const town = cleanText(record[11]);
+        const district = cleanText(record[12]);
+        const county = cleanText(record[13]);
+        const addressDisplay = buildAddressDisplay({ saon, paon, street, locality, town, district, county });
 
         if (!addressDisplay) {
             importProgressTracker.skipped += 1;
@@ -302,10 +310,10 @@ const processFile = async (filePath) => {
             saon,
             paon,
             street,
-            locality: cleanText(record[10]),
-            town: cleanText(record[11]),
-            district: cleanText(record[12]),
-            county: cleanText(record[13]),
+            locality,
+            town,
+            district,
+            county,
             transaction_category: cleanText(record[14]),
             linked_data_uri: cleanText(record[15]),
             address_display: addressDisplay
@@ -416,7 +424,7 @@ const getPaginatedRecords = async ({ searchPostcode, limit, cursor = null }) => 
 
     const mappedRows = slicedRows.map((row) => ({
         ...row,
-        deed_date_display: formatDateYYMMDD(row.deed_date),
+        deed_date_display: formatDateDDMMYYYY(row.deed_date),
         price_paid_display: formatMoney(row.price_paid)
     }));
 

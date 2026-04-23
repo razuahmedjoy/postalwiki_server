@@ -22,7 +22,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
     storage: storage,
-    limits: { fileSize: 100 * 1024 * 1024 }, // 100MB limit
+    limits: { fileSize: 250 * 1024 * 1024 }, // 250MB limit
     fileFilter: (req, file, cb) => {
         // Simple CSV check
         if (file.mimetype === 'text/csv' || file.mimetype === 'application/vnd.ms-excel' || file.originalname.endsWith('.csv')) {
@@ -37,6 +37,13 @@ const upload = multer({
 router.post('/import/start', postcodeController.startImportJob);
 router.post('/import/upload/:jobId', upload.single('file'), postcodeController.uploadAndProcess);
 router.get('/import/status/:jobId', postcodeController.getImportStatus);
+
+// Large postcode check job routes
+router.post('/check/start', postcodeController.startCheckJob);
+router.post('/check/upload/:jobId', upload.single('file'), postcodeController.uploadAndProcessCheckFile);
+router.get('/check/status/:jobId', postcodeController.getCheckStatus);
+router.post('/check/stop/:jobId', postcodeController.stopCheckJob);
+router.get('/check/download/:jobId', postcodeController.downloadCheckResult);
 
 // CRUD Routes
 router.post('/search', postcodeController.searchPostcodes);
